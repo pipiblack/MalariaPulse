@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAIIncidentBrief } from "../src/ai.mjs";
 import { assessZone, buildNetworkSnapshot, draftAdvisories, loadSeedData, planResources, runResponseCycle } from "../src/domain/engine.mjs";
+import { applyParsedImport, parseDataImport } from "../src/domain/imports.mjs";
 
 test("risk assessment flags the seeded Nyakach spike", () => {
   const dataset = loadSeedData();
@@ -88,5 +89,63 @@ test("live AI brief uses the Responses API without storing the aggregate snapsho
   assert.match(request.body.input, /Nyakach North/);
   assert.equal(brief.text, "Review the critical signal.");
   assert.equal(brief.responseId, "resp_test");
+});
+
+test("clinical CSV imports validate and update matching zones atomically", () => {
+  const dataset = loadSeedData();
+  const content = [
+    "zone_id,reporting_week,week_1_cases,week_2_cases,week_3_cases,week_4_cases,week_5_cases,week_6_cases,tests,positive_tests",
+    "nyakach-north,2026-W42,20,22,25,31,49,72,200,72",
+    "kano-plains,2026-W42,30,32,35,39,48,57,210,57"
+  ].join("\n");
+  const result = parseDataImport({ kind: "clinical", filename: "clinical.csv", content, dataset });
+  assert.equal(result.canApply, true);
+  assert.equal(result.validCount, 2);
+  const updated = applyParsedImport(dataset, result);
+  assert.deepEqual(updated.zones.find((zone) => zone.id === "nyakach-north").weeklyCases, [20, 22, 25, 31, 49, 72]);
+  assert.equal(updated.metadata.reportingWeek, "2026-W42");
+  assert.deepEqual(dataset.zones.find((zone) => zone.id === "nyakach-north").weeklyCases, [18, 21, 24, 29, 47, 68]);
+});
+
+test("a bad CSV row blocks the entire import and reports row-level errors", () => {
+  const dataset = loadSeedData();
+  const content = [
+    "zone_id,reporting_week,week_1_cases,week_2_cases,week_3_cases,week_4_cases,week_5_cases,week_6_cases,tests,positive_tests",
+    "nyakach-north,2026-W42,20,22,25,31,49,72,40,72"
+  ].join("\n");
+  const result = parseDataImport({ kind: "clinical", filename: "clinical.csv", content, dataset });
+  assert.equal(result.canApply, false);
+  assert.equal(result.invalidCount, 1);
+  assert.match(result.rows[0].errors.join(" "), /cannot exceed tests/);
+  assert.throws(() => applyParsedImport(dataset, result), /Resolve all import errors/);
+});
+
+test("environment JSON imports accept a rows wrapper", () => {
+  const dataset = loadSeedData();
+  const content = JSON.stringify({ rows: [{ zone_id: "kisumu-west", rainfall_7d_mm: 61.5, temperature_c: 27.2, humidity_pct: 68 }] });
+  const result = parseDataImport({ kind: "environment", filename: "environment.json", content, dataset });
+  assert.equal(result.canApply, true);
+  const updated = applyParsedImport(dataset, result);
+  assert.deepEqual(updated.zones.find((zone) => zone.id === "kisumu-west").environment, { rainfall7dMm: 61.5, temperatureC: 27.2, humidityPct: 68 });
+});
+
+test("supply imports accept tab-separated files", () => {
+  const dataset = loadSeedData();
+  const content = [
+    "clinic_id\tstock_rdt\tstock_act\tstock_nets\tweekly_use_rdt\tweekly_use_act\tweekly_use_nets",
+    "chulaimbo-sch\t260\t180\t110\t46\t28\t11"
+  ].join("\n");
+  const result = parseDataImport({ kind: "supply", filename: "supply.tsv", content, dataset });
+  assert.equal(result.canApply, true);
+  const updated = applyParsedImport(dataset, result);
+  assert.deepEqual(updated.clinics.find((clinic) => clinic.id === "chulaimbo-sch").stock, { rdt: 260, act: 180, nets: 110 });
+});
+
+test("patient-identifying columns are rejected from aggregate uploads", () => {
+  const dataset = loadSeedData();
+  const content = "zone_id,rainfall_7d_mm,temperature_c,humidity_pct,patient_name\nkisumu-west,61,27,68,Example Person";
+  const result = parseDataImport({ kind: "environment", filename: "unsafe.csv", content, dataset });
+  assert.equal(result.canApply, false);
+  assert.match(result.fileErrors.join(" "), /Patient-identifying columns/);
 });
 

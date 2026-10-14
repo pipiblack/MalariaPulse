@@ -1,4 +1,4 @@
-const state = { dashboard: null, dataset: null, aiStatus: null, selectedCycle: null };
+const state = { dashboard: null, dataset: null, aiStatus: null, selectedCycle: null, importFile: null, importPreview: null };
 const $ = (selector) => document.querySelector(selector);
 
 const tones = { critical: "#ca3d3a", high: "#e9665d", watch: "#dc9b2f", low: "#3e9b75" };
@@ -12,10 +12,25 @@ const positions = {
 };
 const viewCopy = {
   overview: ["Operations overview", "Kisumu County · Public health intelligence"],
+  upload: ["Bulk data upload", "Data intake · Validated aggregate files"],
   clinical: ["Clinical data entry", "Surveillance inputs · Aggregated reporting"],
   environment: ["Environmental data entry", "Surveillance inputs · Transmission conditions"],
   supply: ["Supply telemetry", "Resource inputs · Facility stock"],
   ai: ["AI incident analyst", "Live intelligence · OpenAI Responses API"]
+};
+const importSchemas = {
+  clinical: {
+    title: "Clinical reports",
+    columns: ["zone_id", "reporting_week", "week_1_cases", "week_2_cases", "week_3_cases", "week_4_cases", "week_5_cases", "week_6_cases", "tests", "positive_tests"]
+  },
+  environment: {
+    title: "Environmental observations",
+    columns: ["zone_id", "rainfall_7d_mm", "temperature_c", "humidity_pct"]
+  },
+  supply: {
+    title: "Supply inventory",
+    columns: ["clinic_id", "stock_rdt", "stock_act", "stock_nets", "weekly_use_rdt", "weekly_use_act", "weekly_use_nets"]
+  }
 };
 
 function escapeHtml(value) {
@@ -128,6 +143,7 @@ function switchView(name) {
   const [title, eyebrow] = viewCopy[name] ?? viewCopy.overview;
   $("#page-title").textContent = title;
   $("#page-eyebrow").textContent = eyebrow;
+  if (window.location.hash !== `#${name}`) window.history.replaceState(null, "", `#${name}`);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -136,6 +152,102 @@ function fillSelect(selector, items, label, preferredValue) {
   const current = preferredValue || select.value;
   select.innerHTML = items.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(label(item))}</option>`).join("");
   if (items.some((item) => item.id === current)) select.value = current;
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function templateRows(kind) {
+  if (!state.dataset) return [];
+  if (kind === "clinical") {
+    return state.dataset.zones.map((zone) => [zone.id, state.dataset.metadata.reportingWeek, ...zone.weeklyCases, zone.tests, zone.positiveTests]);
+  }
+  if (kind === "environment") {
+    return state.dataset.zones.map((zone) => [zone.id, zone.environment.rainfall7dMm, zone.environment.temperatureC, zone.environment.humidityPct]);
+  }
+  return state.dataset.clinics.map((clinic) => [clinic.id, clinic.stock.rdt, clinic.stock.act, clinic.stock.nets, clinic.weeklyUse.rdt, clinic.weeklyUse.act, clinic.weeklyUse.nets]);
+}
+
+function renderImportGuide() {
+  const kind = $("#import-kind").value;
+  const schema = importSchemas[kind];
+  $("#import-template-title").textContent = schema.title;
+  $("#import-schema-list").innerHTML = schema.columns.map((column) => `<code>${escapeHtml(column)}</code>`).join("");
+}
+
+function resetImportPreview() {
+  state.importPreview = null;
+  $("#import-results").hidden = true;
+  $("#apply-import").disabled = true;
+}
+
+function formatFileSize(bytes) {
+  return bytes < 1_000_000 ? `${Math.max(1, Math.round(bytes / 1_000))} KB` : `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+async function selectImportFile(file) {
+  resetImportPreview();
+  if (!file) {
+    state.importFile = null;
+    $("#import-file-detail").textContent = "No file selected";
+    $("#preview-import").disabled = true;
+    return;
+  }
+  if (!/\.(csv|tsv|json)$/i.test(file.name)) {
+    state.importFile = null;
+    $("#import-file").value = "";
+    $("#import-file-detail").textContent = "Unsupported file";
+    $("#preview-import").disabled = true;
+    toast("Choose a CSV, TSV, or JSON file");
+    return;
+  }
+  if (file.size > 2_000_000) {
+    state.importFile = null;
+    $("#import-file").value = "";
+    $("#import-file-detail").textContent = "File exceeds 2 MB";
+    $("#preview-import").disabled = true;
+    toast("Keep each upload below 2 MB");
+    return;
+  }
+  const content = await file.text();
+  state.importFile = { name: file.name, content };
+  $("#import-file-detail").textContent = `${file.name} · ${formatFileSize(file.size)}`;
+  $("#preview-import").disabled = false;
+}
+
+function renderImportPreview(preview) {
+  state.importPreview = preview;
+  $("#import-results").hidden = false;
+  const pill = $("#import-validation-pill");
+  pill.className = `validation-pill ${preview.canApply ? "valid" : "invalid"}`;
+  pill.textContent = preview.canApply ? "Ready to import" : "Needs correction";
+  $("#import-summary").innerHTML = `<div><span>Total rows</span><strong>${preview.rowCount}</strong></div><div><span>Valid rows</span><strong>${preview.validCount}</strong></div><div><span>Rows with errors</span><strong>${preview.invalidCount}</strong></div><div><span>Format</span><strong>${escapeHtml(preview.format.toUpperCase())}</strong></div>`;
+  const messages = [
+    ...preview.fileErrors.map((message) => ({ tone: "error", message })),
+    ...preview.warnings.map((message) => ({ tone: "warning", message }))
+  ];
+  const issues = $("#import-issues");
+  issues.hidden = messages.length === 0;
+  issues.innerHTML = messages.map((item) => `<p class="${item.tone}">${escapeHtml(item.message)}</p>`).join("");
+  $("#import-preview-rows").innerHTML = preview.rows.map((row) => `<tr><td>${row.rowNumber}</td><td><strong>${escapeHtml(row.identifier || "—")}</strong></td><td>${escapeHtml(row.preview)}</td><td><span class="row-validation ${row.valid ? "valid" : "invalid"}">${row.valid ? "Valid" : escapeHtml(row.errors.join(" "))}</span></td></tr>`).join("") || '<tr><td colspan="4" class="empty-table">No data rows found.</td></tr>';
+  $("#apply-import").disabled = !preview.canApply;
+  $("#import-results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function downloadImportTemplate() {
+  const kind = $("#import-kind").value;
+  const schema = importSchemas[kind];
+  const csv = [schema.columns, ...templateRows(kind)].map((row) => row.map(csvCell).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([`${csv}\n`], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `malariapulse-${kind}-template.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function selectedZone(selector) {
@@ -200,6 +312,7 @@ function hydrateDataForms() {
   renderClinicalForm();
   renderEnvironmentForm();
   renderSupplyForm();
+  renderImportGuide();
 }
 
 async function loadOperationalData() {
@@ -315,6 +428,70 @@ $("#zone-search").addEventListener("input", (event) => renderTable(state.dashboa
 $("#view-method").addEventListener("click", () => showDialog("How risk is scored", "Transparent method", `<section class="review-section"><h3>Weighted signals</h3><div class="driver-list"><span class="driver-chip">Case acceleration · 40%</span><span class="driver-chip">Test positivity · 23%</span><span class="driver-chip">Rainfall · 16%</span><span class="driver-chip">Humidity · 11%</span><span class="driver-chip">Temperature · 10%</span></div></section><p class="subtle" style="font-size:10px;line-height:1.6;margin-top:18px">This interpretable demonstration score is not a clinically validated prediction model. Before production use, calibrate thresholds on local historical surveillance data, quantify sensitivity and specificity, monitor drift, and obtain epidemiology approval.</p>`));
 
 document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));
+$("#import-kind").addEventListener("change", () => {
+  resetImportPreview();
+  renderImportGuide();
+});
+$("#import-file").addEventListener("change", (event) => selectImportFile(event.target.files[0]).catch((error) => toast(error.message)));
+$("#download-template").addEventListener("click", downloadImportTemplate);
+const uploadDrop = $("#upload-drop");
+for (const eventName of ["dragenter", "dragover"]) {
+  uploadDrop.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    uploadDrop.classList.add("dragging");
+  });
+}
+for (const eventName of ["dragleave", "drop"]) {
+  uploadDrop.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    uploadDrop.classList.remove("dragging");
+  });
+}
+uploadDrop.addEventListener("drop", (event) => selectImportFile(event.dataTransfer.files[0]).catch((error) => toast(error.message)));
+$("#upload-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!state.importFile) return;
+  const button = $("#preview-import");
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Validating…";
+  try {
+    const preview = await api("/api/import/preview", {
+      method: "POST",
+      body: JSON.stringify({ kind: $("#import-kind").value, filename: state.importFile.name, content: state.importFile.content })
+    });
+    renderImportPreview(preview);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+});
+$("#apply-import").addEventListener("click", async () => {
+  if (!state.importFile || !state.importPreview?.canApply) return;
+  const button = $("#apply-import");
+  button.disabled = true;
+  button.textContent = "Applying…";
+  try {
+    const result = await api("/api/import/apply", {
+      method: "POST",
+      body: JSON.stringify({ kind: $("#import-kind").value, filename: state.importFile.name, content: state.importFile.content })
+    });
+    await Promise.all([loadOperationalData(), loadDashboard()]);
+    $("#import-last-updated").textContent = `${result.importedRows} rows imported · ${formatTime(result.metadata.updatedAt)}`;
+    const pill = $("#import-validation-pill");
+    pill.className = "validation-pill applied";
+    pill.textContent = "Import applied";
+    state.importPreview.canApply = false;
+    toast(`${result.importedRows} ${result.kind} rows applied to the dashboard`);
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message);
+    return;
+  }
+  button.textContent = "Applied";
+});
 $("#clinical-zone").addEventListener("change", renderClinicalForm);
 $("#environment-zone").addEventListener("change", renderEnvironmentForm);
 $("#supply-clinic").addEventListener("change", renderSupplyForm);
@@ -385,5 +562,7 @@ $("#ai-form").addEventListener("submit", async (event) => {
   }
 });
 
+const initialView = window.location.hash.slice(1);
+if (viewCopy[initialView]) switchView(initialView);
 Promise.all([loadDashboard(), loadOperationalData(), loadAIStatus()]).catch((error) => toast(error.message));
 

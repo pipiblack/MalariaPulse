@@ -17,7 +17,8 @@
         <nav aria-label="Primary navigation">
           <p class="nav-label">Workspace</p>
           <button class="nav-item active" data-view="overview"><span class="nav-icon">⌁</span>Overview</button>
-          <p class="nav-label nav-label-spaced">Data entry</p>
+          <p class="nav-label nav-label-spaced">Data intake</p>
+          <button class="nav-item" data-view="upload"><span class="nav-icon">⇧</span>Bulk upload</button>
           <button class="nav-item" data-view="clinical"><span class="nav-icon">+</span>Clinical reports</button>
           <button class="nav-item" data-view="environment"><span class="nav-icon">☂</span>Environment</button>
           <button class="nav-item" data-view="supply"><span class="nav-icon">◇</span>Supply inventory</button>
@@ -132,6 +133,50 @@
             <span>MalariaPulse v0.1 · Demonstration environment</span>
             <span>Guidance drafts are aligned to WHO prevention and prompt-testing principles.</span>
           </footer>
+          </section>
+
+          <section class="view" data-view-panel="upload">
+            <div class="workspace-intro">
+              <div><p class="eyebrow">Batch data intake</p><h2>Upload aggregate data</h2><p>Import many micro-zones or facilities at once from CSV, TSV, or JSON files.</p></div>
+              <span class="source-stamp" id="import-last-updated">No file imported this session</span>
+            </div>
+            <div class="upload-layout">
+              <form class="panel entry-form" id="upload-form">
+                <div class="panel-header"><div><p class="eyebrow">Step 1</p><h2>Select and validate a file</h2></div><span class="required-note">Maximum 1,000 rows · 2 MB</span></div>
+                <div class="form-body upload-form-body">
+                  <label class="field field-wide"><span>Data type</span><select id="import-kind" required><option value="clinical">Clinical reports</option><option value="environment">Environmental observations</option><option value="supply">Supply inventory</option></select></label>
+                  <label class="upload-drop field-wide" id="upload-drop">
+                    <input id="import-file" class="visually-hidden" type="file" accept=".csv,.tsv,.json,text/csv,text/tab-separated-values,application/json" />
+                    <span class="upload-mark" aria-hidden="true">⇧</span>
+                    <strong>Drop a CSV, TSV, or JSON file here</strong>
+                    <span>or click to choose a file from your computer</span>
+                    <small id="import-file-detail">No file selected</small>
+                  </label>
+                  <div class="privacy-note field-wide"><span aria-hidden="true">⌾</span><div><strong>Aggregate records only</strong><p>Do not upload patient names, phone numbers, national IDs, dates of birth, addresses, or other identifying data.</p></div></div>
+                </div>
+                <div class="form-actions"><p>The whole file is checked before any dashboard value changes.</p><button class="button button-primary" id="preview-import" type="submit" disabled>Validate and preview</button></div>
+              </form>
+              <aside class="panel import-guide">
+                <p class="eyebrow">File template</p><h2 id="import-template-title">Clinical reports</h2>
+                <p>Download a ready-to-fill CSV containing the exact column names and current micro-zone or facility IDs.</p>
+                <button class="button button-secondary import-template-button" id="download-template" type="button">↓ Download CSV template</button>
+                <div class="schema-list" id="import-schema-list"></div>
+                <p class="import-tip">JSON can be an array of row objects or an object containing a <code>rows</code> array.</p>
+              </aside>
+            </div>
+
+            <section class="panel import-results" id="import-results" hidden>
+              <div class="panel-header"><div><p class="eyebrow">Step 2</p><h2>Import preview</h2></div><span class="validation-pill" id="import-validation-pill">Waiting</span></div>
+              <div class="import-summary" id="import-summary"></div>
+              <div class="import-issues" id="import-issues" hidden></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Row</th><th>Zone / facility ID</th><th>Values</th><th>Status</th></tr></thead>
+                  <tbody id="import-preview-rows"></tbody>
+                </table>
+              </div>
+              <div class="form-actions"><p>Applying updates matching records in one atomic import. Unlisted zones and facilities stay unchanged.</p><button class="button button-primary" id="apply-import" type="button" disabled>Apply file to dashboard</button></div>
+            </section>
           </section>
 
           <section class="view" data-view-panel="clinical">

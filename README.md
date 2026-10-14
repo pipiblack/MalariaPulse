@@ -15,7 +15,8 @@ The repository contains two surfaces that share the same deterministic domain en
 - Draft redistribution routes that preserve donor buffers and produce county restock requests for unresolved gaps.
 - English and Kiswahili resident/CHW drafts with character and SMS-segment counts.
 - A browser operations console with a risk map, watchlist, inventory, agent timeline, response review, and approve/reject ledger.
-- In-app tabs for clinical reports, environmental observations, and facility supply telemetry; saved values immediately feed scoring and agent tools.
+- A primary bulk-upload workspace for CSV, TSV, and JSON clinical, environmental, and supply files, with downloadable templates, full-file validation, and row-level errors.
+- Optional single-record tabs for clinical reports, environmental observations, and facility supply telemetry; saved values immediately feed scoring and agent tools.
 - A live AI incident analyst backed by the OpenAI Responses API and the latest saved aggregate snapshot.
 - Eve subagents for surveillance, supply, and community action, plus a root orchestrator and recurring schedule.
 - An always-on human approval gate before stock or outreach authorization.
@@ -58,7 +59,9 @@ cp .env.example .env.local
 npm run demo
 ```
 
-Open `http://localhost:3000`. Use the **Clinical reports**, **Environment**, and **Supply inventory** tabs to replace the synthetic inputs. Saved values go to `data/operational.json`, which is ignored by Git, and immediately affect the dashboard, response cycles, Eve tools, and AI briefs. The immutable `data/seed.json` remains available as the original demo fixture.
+Open `http://localhost:3000`. Use **Bulk upload** to choose a clinical, environment, or supply file, download its CSV template, validate the whole file, and apply it. CSV, TSV, and JSON are supported; imports are limited to 1,000 aggregate rows and 2 MB. One invalid row blocks the entire import, so the saved dataset is never partially updated. The single-record tabs remain available for corrections.
+
+Saved values go to `data/operational.json`, which is ignored by Git, and immediately affect the dashboard, response cycles, Eve tools, and AI briefs. The immutable `data/seed.json` remains available as the original demo fixture. Patient-identifying columns are rejected; this MVP accepts aggregate zone and facility records only.
 
 The API key stays on the server. The browser only receives connection status and never receives or stores the key. Restart the server after changing `.env.local`.
 

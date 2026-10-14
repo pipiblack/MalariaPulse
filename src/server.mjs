@@ -5,10 +5,12 @@ import { fileURLToPath } from "node:url";
 import { config } from "./config.mjs";
 import { createAIIncidentBrief, getAIStatus } from "./ai.mjs";
 import {
+  applyDataImport,
   createCycle,
   decideCycle,
   getDashboardState,
   getOperationalData,
+  previewDataImport,
   updateClinicalData,
   updateEnvironmentData,
   updateSupplyData
@@ -35,7 +37,7 @@ async function readJson(request) {
   let bytes = 0;
   for await (const chunk of request) {
     bytes += chunk.length;
-    if (bytes > 100_000) throw new Error("Request body is too large.");
+    if (bytes > 4_500_000) throw new Error("Request body is too large. Keep upload files below 2 MB.");
     chunks.push(chunk);
   }
   if (chunks.length === 0) return {};
@@ -85,6 +87,16 @@ export function createAppServer() {
         const input = await readJson(request);
         const cycle = createCycle({ zoneId: typeof input.zoneId === "string" && input.zoneId ? input.zoneId : undefined });
         return json(response, 201, cycle);
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/import/preview") {
+        const input = await readJson(request);
+        return json(response, 200, previewDataImport(input));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/import/apply") {
+        const input = await readJson(request);
+        return json(response, 200, applyDataImport(input));
       }
 
       const clinicalMatch = url.pathname.match(/^\/api\/data\/clinical\/([^/]+)$/);

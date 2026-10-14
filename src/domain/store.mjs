@@ -2,6 +2,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildNetworkSnapshot, loadDataset, runResponseCycle } from "./engine.mjs";
+import { applyParsedImport, parseDataImport } from "./imports.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const RUNTIME_PATH = resolve(ROOT, "data/runtime.json");
@@ -114,6 +115,37 @@ export function updateSupplyData(clinicId, input) {
   }
   writeDataset(stamp(dataset, "supply-entry"));
   return { clinic, metadata: dataset.metadata };
+}
+
+export function previewDataImport(input) {
+  const result = parseDataImport({ ...input, dataset: loadDataset() });
+  const { normalizedRows, ...preview } = result;
+  return {
+    ...preview,
+    rows: preview.rows.map(({ normalized, ...row }) => row)
+  };
+}
+
+export function applyDataImport(input) {
+  const current = loadDataset();
+  const result = parseDataImport({ ...input, dataset: current });
+  if (!result.canApply) throw new Error("The file contains validation errors. Preview it and correct every issue before importing.");
+  const importedAt = new Date().toISOString();
+  const dataset = applyParsedImport(current, result);
+  stamp(dataset, `${result.kind}-file-import`);
+  dataset.metadata.lastImport = {
+    kind: result.kind,
+    filename: result.filename.slice(0, 180),
+    rows: result.rowCount,
+    importedAt
+  };
+  writeDataset(dataset);
+  return {
+    kind: result.kind,
+    filename: result.filename,
+    importedRows: result.rowCount,
+    metadata: dataset.metadata
+  };
 }
 
 export function decideCycle(cycleId, decision, reviewer = "Operations reviewer") {
