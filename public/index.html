@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="MalariaPulse epidemic early warning and response operations console" />
+    <title>MalariaPulse · Operations</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#top" aria-label="MalariaPulse home">
+          <span class="brand-mark" aria-hidden="true"><span></span></span>
+          <span>Malaria<span>Pulse</span></span>
+        </a>
+        <nav aria-label="Primary navigation">
+          <p class="nav-label">Workspace</p>
+          <button class="nav-item active" data-view="overview"><span class="nav-icon">⌁</span>Overview</button>
+          <p class="nav-label nav-label-spaced">Data entry</p>
+          <button class="nav-item" data-view="clinical"><span class="nav-icon">+</span>Clinical reports</button>
+          <button class="nav-item" data-view="environment"><span class="nav-icon">☂</span>Environment</button>
+          <button class="nav-item" data-view="supply"><span class="nav-icon">◇</span>Supply inventory</button>
+          <p class="nav-label nav-label-spaced">Intelligence</p>
+          <button class="nav-item" data-view="ai"><span class="nav-icon">✦</span>AI analyst</button>
+        </nav>
+        <div class="sidebar-status">
+          <div class="status-row"><span class="live-dot"></span><span>All agents online</span></div>
+          <p>Last sync <span id="last-sync">—</span></p>
+        </div>
+        <div class="profile">
+          <div class="avatar">NO</div>
+          <div><strong>Nyanza Operations</strong><span>County response team</span></div>
+          <button aria-label="Profile menu">•••</button>
+        </div>
+      </aside>
+
+      <main id="top">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="page-eyebrow">Kisumu County · Public health intelligence</p>
+            <h1 id="page-title">Operations overview</h1>
+          </div>
+          <div class="topbar-actions">
+            <span class="demo-badge" id="data-mode-badge">Demonstration data</span>
+            <button class="button button-secondary" id="refresh-button">Refresh</button>
+            <button class="button button-primary" id="run-button"><span aria-hidden="true">▶</span> Run response cycle</button>
+          </div>
+        </header>
+
+        <div class="content">
+          <section class="view active" data-view-panel="overview" id="overview">
+          <section class="notice" aria-label="System notice">
+            <div class="notice-icon">i</div>
+            <p><strong>Decision-support mode.</strong> Predictions and drafts require local validation. No stock movement or public message is sent automatically.</p>
+            <button class="text-button" id="notice-dismiss" aria-label="Dismiss notice">×</button>
+          </section>
+
+          <section class="metric-grid" aria-label="Network summary">
+            <article class="metric-card">
+              <div class="metric-heading"><span>Zones monitored</span><span class="metric-icon blue">◎</span></div>
+              <strong id="metric-zones">—</strong>
+              <small><span class="healthy">●</span> Clinical + environmental feeds</small>
+            </article>
+            <article class="metric-card">
+              <div class="metric-heading"><span>High-risk zones</span><span class="metric-icon coral">!</span></div>
+              <strong id="metric-risk">—</strong>
+              <small id="metric-risk-copy">Awaiting assessment</small>
+            </article>
+            <article class="metric-card">
+              <div class="metric-heading"><span>Facilities reporting</span><span class="metric-icon violet">+</span></div>
+              <strong id="metric-facilities">—</strong>
+              <small>100% of demo network reporting</small>
+            </article>
+            <article class="metric-card">
+              <div class="metric-heading"><span>Supply readiness</span><span class="metric-icon mint">▣</span></div>
+              <strong id="metric-readiness">—</strong>
+              <small>Weighted three-week buffer</small>
+            </article>
+          </section>
+
+          <section class="dashboard-grid" id="risk">
+            <article class="panel map-panel">
+              <div class="panel-header">
+                <div><p class="eyebrow">Surveillance agent</p><h2>Micro-zone risk</h2></div>
+                <div class="legend"><span><i class="critical"></i>Critical</span><span><i class="high"></i>High</span><span><i class="watch"></i>Watch</span><span><i class="low"></i>Low</span></div>
+              </div>
+              <div class="map-stage" id="risk-map" aria-label="Stylized risk map for monitored zones"></div>
+              <div class="map-footer"><span>Risk score blends cases, test positivity, rainfall, humidity and temperature.</span><button class="text-button" id="view-method">View method →</button></div>
+            </article>
+
+            <article class="panel alerts-panel">
+              <div class="panel-header">
+                <div><p class="eyebrow">Needs attention</p><h2>Priority alerts</h2></div>
+                <span class="count-pill" id="alert-count">0</span>
+              </div>
+              <div id="alerts-list" class="alerts-list"><div class="skeleton tall"></div><div class="skeleton tall"></div></div>
+            </article>
+          </section>
+
+          <section class="panel table-panel">
+            <div class="panel-header">
+              <div><p class="eyebrow">Latest assessment</p><h2>Zone watchlist</h2></div>
+              <label class="search"><span>⌕</span><input id="zone-search" type="search" placeholder="Search zones" /></label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Zone</th><th>Risk</th><th>Score</th><th>Weekly cases</th><th>Trend</th><th>Test positivity</th><th>Confidence</th><th></th></tr></thead>
+                <tbody id="zone-table"><tr><td colspan="8"><div class="skeleton"></div></td></tr></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="bottom-grid" id="response">
+            <article class="panel inventory-panel">
+              <div class="panel-header">
+                <div><p class="eyebrow">Supply agent</p><h2>Network inventory</h2></div>
+                <span class="health-pill"><span class="live-dot"></span>Telemetry healthy</span>
+              </div>
+              <div class="inventory-grid" id="inventory-grid"></div>
+            </article>
+            <article class="panel activity-panel" id="activity">
+              <div class="panel-header">
+                <div><p class="eyebrow">Orchestrator</p><h2>Agent activity</h2></div>
+                <span class="subtle" id="cycle-status">No active cycle</span>
+              </div>
+              <div class="timeline" id="agent-timeline"></div>
+            </article>
+          </section>
+
+          <footer>
+            <span>MalariaPulse v0.1 · Demonstration environment</span>
+            <span>Guidance drafts are aligned to WHO prevention and prompt-testing principles.</span>
+          </footer>
+          </section>
+
+          <section class="view" data-view-panel="clinical">
+            <div class="workspace-intro">
+              <div><p class="eyebrow">Aggregated surveillance</p><h2>Clinical reports</h2><p>Enter six rolling weekly totals and the current testing volume for one micro-zone.</p></div>
+              <span class="source-stamp" id="clinical-updated">Not yet loaded</span>
+            </div>
+            <div class="entry-layout">
+              <form class="panel entry-form" id="clinical-form">
+                <div class="panel-header"><div><p class="eyebrow">Weekly submission</p><h2>Case and testing data</h2></div><span class="required-note">Aggregated data only</span></div>
+                <div class="form-body">
+                  <label class="field field-wide"><span>Micro-zone</span><select id="clinical-zone" required></select></label>
+                  <label class="field"><span>Reporting week</span><input id="reporting-week" type="week" required /></label>
+                  <div class="field field-wide"><span>Weekly confirmed cases · oldest to newest</span><div class="week-inputs" id="clinical-weeks"></div></div>
+                  <label class="field"><span>Tests performed</span><input id="clinical-tests" type="number" min="0" step="1" required /></label>
+                  <label class="field"><span>Positive tests</span><input id="clinical-positive" type="number" min="0" step="1" required /></label>
+                </div>
+                <div class="form-actions"><p>Saving immediately updates risk scores and future AI briefs.</p><button class="button button-primary" type="submit">Save clinical report</button></div>
+              </form>
+              <aside class="panel entry-guide">
+                <p class="eyebrow">Data quality</p><h2>Before saving</h2>
+                <ul><li>Use confirmed aggregate totals, not patient records.</li><li>Keep the same zone and week definitions across facilities.</li><li>Positive tests cannot exceed tests performed.</li><li>Verify unusual jumps before initiating response.</li></ul>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view" data-view-panel="environment">
+            <div class="workspace-intro">
+              <div><p class="eyebrow">Environmental observations</p><h2>Transmission conditions</h2><p>Update the environmental proxies used by the surveillance score.</p></div>
+              <span class="source-stamp" id="environment-updated">Not yet loaded</span>
+            </div>
+            <div class="entry-layout">
+              <form class="panel entry-form" id="environment-form">
+                <div class="panel-header"><div><p class="eyebrow">Latest observation</p><h2>Rainfall, temperature and humidity</h2></div><span class="required-note">Zone aggregate</span></div>
+                <div class="form-body">
+                  <label class="field field-wide"><span>Micro-zone</span><select id="environment-zone" required></select></label>
+                  <label class="field"><span>Rainfall · last 7 days (mm)</span><input id="environment-rainfall" type="number" min="0" max="2000" step="0.1" required /></label>
+                  <label class="field"><span>Mean temperature (°C)</span><input id="environment-temperature" type="number" min="-10" max="60" step="0.1" required /></label>
+                  <label class="field"><span>Mean relative humidity (%)</span><input id="environment-humidity" type="number" min="0" max="100" step="0.1" required /></label>
+                </div>
+                <div class="form-actions"><p>Use measurements with known station or provider provenance.</p><button class="button button-primary" type="submit">Save environment data</button></div>
+              </form>
+              <aside class="panel entry-guide climate-card">
+                <p class="eyebrow">Current zone signal</p><h2 id="environment-zone-name">—</h2>
+                <div class="signal-stat"><span>Rainfall</span><strong id="signal-rainfall">—</strong></div>
+                <div class="signal-stat"><span>Temperature</span><strong id="signal-temperature">—</strong></div>
+                <div class="signal-stat"><span>Humidity</span><strong id="signal-humidity">—</strong></div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view" data-view-panel="supply">
+            <div class="workspace-intro">
+              <div><p class="eyebrow">Facility telemetry</p><h2>Supply inventory</h2><p>Record available stock and average weekly consumption for response planning.</p></div>
+              <span class="source-stamp" id="supply-updated">Not yet loaded</span>
+            </div>
+            <form class="panel entry-form" id="supply-form">
+              <div class="panel-header"><div><p class="eyebrow">Facility stock card</p><h2 id="supply-facility-title">Select a facility</h2></div><span class="required-note">Units on hand</span></div>
+              <div class="form-body">
+                <label class="field field-wide"><span>Health facility</span><select id="supply-clinic" required></select></label>
+                <div class="stock-entry-table field-wide">
+                  <div class="stock-entry-row stock-entry-head"><span>Commodity</span><span>Available stock</span><span>Average weekly use</span><span>Coverage</span></div>
+                  <div class="stock-entry-row"><strong>RDT kits</strong><input id="stock-rdt" type="number" min="0" step="1" required /><input id="use-rdt" type="number" min="0" step="1" required /><span id="coverage-rdt">—</span></div>
+                  <div class="stock-entry-row"><strong>ACT courses</strong><input id="stock-act" type="number" min="0" step="1" required /><input id="use-act" type="number" min="0" step="1" required /><span id="coverage-act">—</span></div>
+                  <div class="stock-entry-row"><strong>Treated nets</strong><input id="stock-nets" type="number" min="0" step="1" required /><input id="use-nets" type="number" min="0" step="1" required /><span id="coverage-nets">—</span></div>
+                </div>
+              </div>
+              <div class="form-actions"><p>Physical stock verification should precede operational movement.</p><button class="button button-primary" type="submit">Save supply telemetry</button></div>
+            </form>
+          </section>
+
+          <section class="view" data-view-panel="ai">
+            <div class="workspace-intro">
+              <div><p class="eyebrow">Live OpenAI analysis</p><h2>AI incident analyst</h2><p>Generate a fresh operational brief from the latest saved clinical, environmental, and supply data.</p></div>
+              <span class="ai-connection" id="ai-connection"><i></i>Checking configuration</span>
+            </div>
+            <div class="ai-layout">
+              <form class="panel ai-controls" id="ai-form">
+                <div class="panel-header"><div><p class="eyebrow">Analysis request</p><h2>Ask the response analyst</h2></div><span class="model-pill" id="ai-model">—</span></div>
+                <div class="form-body">
+                  <label class="field field-wide"><span>Micro-zone</span><select id="ai-zone" required></select></label>
+                  <label class="field field-wide"><span>Operational question</span><textarea id="ai-question" rows="5" maxlength="1000" placeholder="What should the county response team prioritize in the next 24 hours?"></textarea></label>
+                  <div class="key-guidance field-wide" id="key-guidance"><strong>Server-side key required</strong><span>Add <code>OPENAI_API_KEY</code> to <code>.env.local</code>, then restart the server. The key is never returned to this page.</span></div>
+                </div>
+                <div class="form-actions"><p>AI output remains decision support and requires human validation.</p><button class="button button-primary" id="ai-submit" type="submit">✦ Generate live brief</button></div>
+              </form>
+              <article class="panel ai-output">
+                <div class="panel-header"><div><p class="eyebrow">Generated response</p><h2>Incident brief</h2></div><span class="source-stamp" id="ai-generated">Not generated</span></div>
+                <div class="ai-answer empty" id="ai-answer"><div class="ai-empty-mark">✦</div><strong>Ready when your data is ready</strong><p>Select a zone and generate a brief. The model receives only the aggregated snapshot shown in this system.</p></div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <dialog id="cycle-dialog">
+      <div class="dialog-shell">
+        <header class="dialog-header">
+          <div><p class="eyebrow" id="dialog-eyebrow">Response plan</p><h2 id="dialog-title">Review agent output</h2></div>
+          <button class="dialog-close" id="dialog-close" aria-label="Close">×</button>
+        </header>
+        <div class="dialog-body" id="dialog-body"></div>
+        <footer class="dialog-footer" id="dialog-footer"></footer>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
+

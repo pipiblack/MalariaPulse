@@ -1,0 +1,159 @@
+{
+  "metadata": {
+    "country": "Kenya",
+    "county": "Kisumu",
+    "reportingWeek": "2026-W41",
+    "updatedAt": "2026-10-14T06:00:00.000Z",
+    "dataCompleteness": 0.94,
+    "mode": "demonstration"
+  },
+  "zones": [
+    {
+      "id": "nyakach-north",
+      "name": "Nyakach North",
+      "subcounty": "Nyakach",
+      "population": 42100,
+      "coordinates": { "lat": -0.337, "lng": 34.932 },
+      "weeklyCases": [18, 21, 24, 29, 47, 68],
+      "tests": 184,
+      "positiveTests": 68,
+      "environment": { "rainfall7dMm": 137, "temperatureC": 27.4, "humidityPct": 81 },
+      "clinicIds": ["nyakach-ch", "pap-onditi-hc"]
+    },
+    {
+      "id": "kano-plains",
+      "name": "Kano Plains",
+      "subcounty": "Nyando",
+      "population": 51800,
+      "coordinates": { "lat": -0.137, "lng": 34.944 },
+      "weeklyCases": [31, 28, 34, 37, 45, 53],
+      "tests": 191,
+      "positiveTests": 53,
+      "environment": { "rainfall7dMm": 118, "temperatureC": 28.1, "humidityPct": 77 },
+      "clinicIds": ["awasi-sdh", "ahero-cch"]
+    },
+    {
+      "id": "muhoroni-east",
+      "name": "Muhoroni East",
+      "subcounty": "Muhoroni",
+      "population": 38600,
+      "coordinates": { "lat": -0.154, "lng": 35.196 },
+      "weeklyCases": [22, 25, 23, 28, 31, 36],
+      "tests": 169,
+      "positiveTests": 36,
+      "environment": { "rainfall7dMm": 83, "temperatureC": 27.1, "humidityPct": 72 },
+      "clinicIds": ["muhoroni-sch"]
+    },
+    {
+      "id": "seme-central",
+      "name": "Seme Central",
+      "subcounty": "Seme",
+      "population": 44700,
+      "coordinates": { "lat": -0.087, "lng": 34.534 },
+      "weeklyCases": [26, 29, 27, 25, 24, 27],
+      "tests": 156,
+      "positiveTests": 27,
+      "environment": { "rainfall7dMm": 69, "temperatureC": 26.5, "humidityPct": 69 },
+      "clinicIds": ["kombewa-ch"]
+    },
+    {
+      "id": "kisumu-west",
+      "name": "Kisumu West",
+      "subcounty": "Kisumu West",
+      "population": 63200,
+      "coordinates": { "lat": -0.061, "lng": 34.718 },
+      "weeklyCases": [19, 17, 20, 18, 21, 20],
+      "tests": 148,
+      "positiveTests": 20,
+      "environment": { "rainfall7dMm": 54, "temperatureC": 26.8, "humidityPct": 65 },
+      "clinicIds": ["chulaimbo-sch"]
+    },
+    {
+      "id": "kisumu-central",
+      "name": "Kisumu Central",
+      "subcounty": "Kisumu Central",
+      "population": 174300,
+      "coordinates": { "lat": -0.102, "lng": 34.761 },
+      "weeklyCases": [41, 39, 43, 40, 38, 42],
+      "tests": 291,
+      "positiveTests": 42,
+      "environment": { "rainfall7dMm": 48, "temperatureC": 27.7, "humidityPct": 64 },
+      "clinicIds": ["jootrh", "railways-dispensary"]
+    }
+  ],
+  "clinics": [
+    {
+      "id": "nyakach-ch",
+      "name": "Nyakach County Hospital",
+      "zoneId": "nyakach-north",
+      "coordinates": { "lat": -0.331, "lng": 34.949 },
+      "stock": { "rdt": 96, "act": 62, "nets": 44 },
+      "weeklyUse": { "rdt": 82, "act": 54, "nets": 18 }
+    },
+    {
+      "id": "pap-onditi-hc",
+      "name": "Pap Onditi Health Centre",
+      "zoneId": "nyakach-north",
+      "coordinates": { "lat": -0.292, "lng": 34.968 },
+      "stock": { "rdt": 48, "act": 31, "nets": 27 },
+      "weeklyUse": { "rdt": 53, "act": 36, "nets": 13 }
+    },
+    {
+      "id": "awasi-sdh",
+      "name": "Awasi Sub-County Hospital",
+      "zoneId": "kano-plains",
+      "coordinates": { "lat": -0.172, "lng": 35.083 },
+      "stock": { "rdt": 118, "act": 83, "nets": 64 },
+      "weeklyUse": { "rdt": 69, "act": 47, "nets": 17 }
+    },
+    {
+      "id": "ahero-cch",
+      "name": "Ahero County Hospital",
+      "zoneId": "kano-plains",
+      "coordinates": { "lat": -0.174, "lng": 34.919 },
+      "stock": { "rdt": 87, "act": 54, "nets": 39 },
+      "weeklyUse": { "rdt": 61, "act": 42, "nets": 14 }
+    },
+    {
+      "id": "muhoroni-sch",
+      "name": "Muhoroni Sub-County Hospital",
+      "zoneId": "muhoroni-east",
+      "coordinates": { "lat": -0.158, "lng": 35.199 },
+      "stock": { "rdt": 312, "act": 228, "nets": 141 },
+      "weeklyUse": { "rdt": 57, "act": 34, "nets": 12 }
+    },
+    {
+      "id": "kombewa-ch",
+      "name": "Kombewa County Hospital",
+      "zoneId": "seme-central",
+      "coordinates": { "lat": -0.105, "lng": 34.524 },
+      "stock": { "rdt": 284, "act": 196, "nets": 132 },
+      "weeklyUse": { "rdt": 49, "act": 29, "nets": 11 }
+    },
+    {
+      "id": "chulaimbo-sch",
+      "name": "Chulaimbo Sub-County Hospital",
+      "zoneId": "kisumu-west",
+      "coordinates": { "lat": -0.039, "lng": 34.635 },
+      "stock": { "rdt": 246, "act": 173, "nets": 104 },
+      "weeklyUse": { "rdt": 45, "act": 27, "nets": 10 }
+    },
+    {
+      "id": "jootrh",
+      "name": "Jaramogi Oginga Odinga Teaching & Referral Hospital",
+      "zoneId": "kisumu-central",
+      "coordinates": { "lat": -0.087, "lng": 34.769 },
+      "stock": { "rdt": 691, "act": 518, "nets": 287 },
+      "weeklyUse": { "rdt": 91, "act": 58, "nets": 21 }
+    },
+    {
+      "id": "railways-dispensary",
+      "name": "Railways Dispensary",
+      "zoneId": "kisumu-central",
+      "coordinates": { "lat": -0.109, "lng": 34.754 },
+      "stock": { "rdt": 174, "act": 126, "nets": 63 },
+      "weeklyUse": { "rdt": 38, "act": 24, "nets": 8 }
+    }
+  ]
+}
+

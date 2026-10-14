@@ -1,0 +1,27 @@
+{
+  "name": "malaria-pulse",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agentic malaria early-warning and community intervention system",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --watch src/server.mjs",
+    "demo": "node src/server.mjs",
+    "dev:agent": "eve dev",
+    "build:agent": "eve build",
+    "start:agent": "eve start",
+    "test": "node tests/engine.test.mjs",
+    "check": "node --check src/server.mjs && node --check src/ai.mjs && node --check src/config.mjs && node --check src/domain/engine.mjs && node --check src/domain/store.mjs && node --check public/app.js"
+  },
+  "dependencies": {
+    "ai": "^7.0.0",
+    "eve": "^0.79.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "just-bash": "^3.6.0"
+  }
+}

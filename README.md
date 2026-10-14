@@ -1,0 +1,132 @@
+# MalariaPulse
+
+MalariaPulse is a safety-gated, multi-agent malaria early-warning and response MVP for county health teams, clinics, and community health workers. It combines aggregated clinical trends, environmental signals, and inventory telemetry to surface micro-zone risk, draft resource plans, and prepare localized outreach.
+
+The repository contains two surfaces that share the same deterministic domain engine:
+
+- a standalone operations console that runs without model credentials;
+- an [Eve](https://eve.dev/docs) durable agent with three isolated specialists, a six-hour surveillance schedule, and human approval for operational release.
+
+## What works now
+
+- Interpretable risk scores for six demo micro-zones from case acceleration, test positivity, rainfall, humidity, and temperature.
+- `low`, `watch`, `high`, and `critical` tiers with confidence, projected cases, and explainable drivers.
+- Facility-level RDT, ACT, and treated-net safety-stock estimates.
+- Draft redistribution routes that preserve donor buffers and produce county restock requests for unresolved gaps.
+- English and Kiswahili resident/CHW drafts with character and SMS-segment counts.
+- A browser operations console with a risk map, watchlist, inventory, agent timeline, response review, and approve/reject ledger.
+- In-app tabs for clinical reports, environmental observations, and facility supply telemetry; saved values immediately feed scoring and agent tools.
+- A live AI incident analyst backed by the OpenAI Responses API and the latest saved aggregate snapshot.
+- Eve subagents for surveillance, supply, and community action, plus a root orchestrator and recurring schedule.
+- An always-on human approval gate before stock or outreach authorization.
+- Node tests for scoring, planning, messaging, and orchestration.
+
+## Architecture
+
+```text
+Aggregated feeds
+      │
+      ▼
+Surveillance specialist ── risk tier + evidence
+      │ high / critical
+      ├──────────────┐
+      ▼              ▼
+Supply specialist   Community action specialist
+      │              │
+      └──────┬───────┘
+             ▼
+      Root orchestrator
+             │
+             ▼
+       Human approval gate
+             │
+             ▼
+   Future dispatch adapters (not connected)
+```
+
+The browser demo executes the same three stages deterministically so it remains evaluable without an LLM or external service. Eve adds durable sessions, specialist delegation, scheduled runs, and approval semantics.
+
+## Run the operations console
+
+Node 24+ is the supported project runtime because Eve 0.79 requires it.
+
+```bash
+nvm use
+npm install
+cp .env.example .env.local
+# Add your OPENAI_API_KEY to .env.local
+npm run demo
+```
+
+Open `http://localhost:3000`. Use the **Clinical reports**, **Environment**, and **Supply inventory** tabs to replace the synthetic inputs. Saved values go to `data/operational.json`, which is ignored by Git, and immediately affect the dashboard, response cycles, Eve tools, and AI briefs. The immutable `data/seed.json` remains available as the original demo fixture.
+
+The API key stays on the server. The browser only receives connection status and never receives or stores the key. Restart the server after changing `.env.local`.
+
+The standalone console itself uses only Node built-ins, so its tests can also run in constrained environments before dependencies are installed:
+
+```bash
+npm test
+npm run check
+```
+
+## Run the durable agent
+
+Configure one model connection (AI Gateway by default), then start Eve:
+
+```bash
+cp .env.example .env.local
+npm run dev:agent
+```
+
+Example prompts:
+
+```text
+Run the current network surveillance sweep and prepare drafts for every high-risk zone.
+Assess Nyakach North and explain the top three drivers.
+Prepare a response brief for Kano Plains, but do not request release approval yet.
+```
+
+Production schedules fire every six hours. During local Eve development, trigger the schedule once with:
+
+```bash
+curl -X POST http://localhost:2000/eve/v1/dev/schedules/surveillance_sweep
+```
+
+## Safety posture
+
+This MVP is not a medical device, outbreak declaration system, or autonomous dispatch system. The data are synthetic. The score has not been epidemiologically calibrated, and an alert is not a confirmed outbreak. Before field use:
+
+1. Replace seed data with approved, aggregated feeds and a clear data-sharing basis.
+2. Calibrate thresholds on local historical surveillance data and report sensitivity, specificity, false-alert cost, uncertainty, and drift.
+3. Add authentication, role-based authorization, audit retention, encryption, and tenant/county isolation.
+4. Validate inventory units, facility master data, cold-chain or transport constraints, and stock-ledger reconciliation.
+5. Have county epidemiology, pharmacy/logistics, clinical, community-health, and language leads approve workflows and templates.
+6. Connect outbound SMS/WhatsApp and logistics systems only through idempotent adapters with explicit approval and delivery receipts.
+
+The outreach language follows the prevention, prompt-testing, and care-seeking principles in the [WHO malaria fact sheet](https://www.who.int/news-room/fact-sheets/detail/malaria). Local policy and approved Ministry of Health templates take precedence.
+
+## Repository guide
+
+```text
+agent/                         Eve root orchestrator
+  subagents/surveillance/     Risk specialist and tool
+  subagents/supply/           Inventory specialist and tool
+  subagents/community_action/ Outreach specialist and tool
+  schedules/                  Six-hour surveillance sweep
+  tools/                      Human approval gate
+data/seed.json                Synthetic county network
+public/                       Operations console UI
+src/domain/                   Shared scoring, planning, and message engine
+src/server.mjs                Zero-dependency local API and static server
+tests/                        Deterministic domain tests
+```
+
+## Next production milestones
+
+- Ingestion adapters and data contracts for DHIS2/aggregate clinic reporting, weather observations, and stock systems.
+- A time-series database with provenance, late-arriving-data handling, validation, and model monitoring.
+- Retrospective backtesting and prospective shadow-mode evaluation with epidemiologists.
+- Real geospatial routing and configurable facility safety-stock policies.
+- Approved provider integrations for WhatsApp/SMS and logistics, both behind role-scoped approval.
+- Authentication, county tenancy, observability, incident review, and disaster-recovery procedures.
+
