@@ -1,8 +1,12 @@
 node_modules/
+.venv/
+__pycache__/
+*.py[cod]
 .eve/
 .output/
 .env
 .env.local
+.streamlit/secrets.toml
 data/runtime.json
 data/runtime.json.tmp
 data/operational.json

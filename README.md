@@ -2,9 +2,10 @@
 
 MalariaPulse is a safety-gated, multi-agent malaria early-warning and response MVP for county health teams, clinics, and community health workers. It combines aggregated clinical trends, environmental signals, and inventory telemetry to surface micro-zone risk, draft resource plans, and prepare localized outreach.
 
-The repository contains two surfaces that share the same deterministic domain engine:
+The repository contains three compatible surfaces backed by the same operational JSON data:
 
-- a standalone operations console that runs without model credentials;
+- a Streamlit operations dashboard for uploads, tabbed data entry, response review, and live AI analysis;
+- a legacy zero-dependency Node operations console;
 - an [Eve](https://eve.dev/docs) durable agent with three isolated specialists, a six-hour surveillance schedule, and human approval for operational release.
 
 ## What works now
@@ -14,10 +15,10 @@ The repository contains two surfaces that share the same deterministic domain en
 - Facility-level RDT, ACT, and treated-net safety-stock estimates.
 - Draft redistribution routes that preserve donor buffers and produce county restock requests for unresolved gaps.
 - English and Kiswahili resident/CHW drafts with character and SMS-segment counts.
-- A browser operations console with a risk map, watchlist, inventory, agent timeline, response review, and approve/reject ledger.
+- A Streamlit operations dashboard with a risk watchlist, trends, inventory, agent response review, and approve/reject ledger.
 - A primary bulk-upload workspace for CSV, TSV, and JSON clinical, environmental, and supply files, with downloadable templates, full-file validation, and row-level errors.
 - Optional single-record tabs for clinical reports, environmental observations, and facility supply telemetry; saved values immediately feed scoring and agent tools.
-- A live AI incident analyst backed by the OpenAI Responses API and the latest saved aggregate snapshot.
+- A live AI operations analyst backed by the OpenAI Responses API, with county-wide and micro-zone reviews, structured findings, ranked priorities, and explicit data-quality notes.
 - Eve subagents for surveillance, supply, and community action, plus a root orchestrator and recurring schedule.
 - An always-on human approval gate before stock or outreach authorization.
 - Node tests for scoring, planning, messaging, and orchestration.
@@ -47,7 +48,39 @@ Supply specialist   Community action specialist
 
 The browser demo executes the same three stages deterministically so it remains evaluable without an LLM or external service. Eve adds durable sessions, specialist delegation, scheduled runs, and approval semantics.
 
-## Run the operations console
+## Run the Streamlit dashboard
+
+Python 3.11+ is recommended. From the project directory:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+cp .env.example .env.local
+# Add your OPENAI_API_KEY to .env.local
+python3 -m streamlit run streamlit_app.py
+```
+
+Open `http://localhost:8501`. The Streamlit tabs provide the full workflow: overview and agent response cycles, validated bulk upload, single-zone clinical and environmental corrections, facility supply entry, and live AI reviews. Every micro-zone field is a dropdown populated from the current dataset.
+
+The dashboard and existing Node/Eve implementation read and write the same ignored `data/operational.json` file, so data entered through either interface remains available to the others. Uploaded CSV, TSV, and JSON files are limited to 1,000 aggregate rows and 2 MB. One invalid row blocks the entire import.
+
+The OpenAI key stays on the Streamlit server. As an alternative to `.env.local`, create an ignored `.streamlit/secrets.toml`:
+
+```toml
+OPENAI_API_KEY = "your_key_here"
+OPENAI_MODEL = "gpt-6-astra"
+```
+
+The analyst uses the latest saved dataset for each request and returns a structured high-level review with evidence-backed findings, ranked actions, data-quality notes, and limitations. Resource movements and outreach remain drafts until a human reviewer approves them.
+
+Run the Python checks with:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_python_*.py'
+```
+
+## Run the legacy Node console
 
 Node 24+ is the supported project runtime because Eve 0.79 requires it.
 
@@ -63,7 +96,9 @@ Open `http://localhost:3000`. Use **Bulk upload** to choose a clinical, environm
 
 Saved values go to `data/operational.json`, which is ignored by Git, and immediately affect the dashboard, response cycles, Eve tools, and AI briefs. The immutable `data/seed.json` remains available as the original demo fixture. Patient-identifying columns are rejected; this MVP accepts aggregate zone and facility records only.
 
-The API key stays on the server. The browser only receives connection status and never receives or stores the key. Restart the server after changing `.env.local`.
+Open **AI analyst** after saving or importing data. The default **County network** scope compares every zone and facility for a high-level management review. You can also select one micro-zone, choose a suggested review, or enter an operational question. Each request reads `data/operational.json` again, so newly applied data are included without copying them into the AI form.
+
+The API key stays on the server. The browser only receives connection status and never receives or stores the key. Restart the server after changing `.env.local`. The analyst returns a structured review containing an overall risk level, executive summary, evidence-backed findings, ranked actions, source-quality notes, and limitations.
 
 The standalone console itself uses only Node built-ins, so its tests can also run in constrained environments before dependencies are installed:
 
@@ -119,6 +154,9 @@ agent/                         Eve root orchestrator
   tools/                      Human approval gate
 data/seed.json                Synthetic county network
 public/                       Operations console UI
+malariapulse/                 Python domain and AI integration
+streamlit_app.py              Primary Streamlit dashboard
+requirements.txt              Python dashboard dependencies
 src/domain/                   Shared scoring, planning, and message engine
 src/server.mjs                Zero-dependency local API and static server
 tests/                        Deterministic domain tests

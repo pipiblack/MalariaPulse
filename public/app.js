@@ -16,7 +16,7 @@ const viewCopy = {
   clinical: ["Clinical data entry", "Surveillance inputs · Aggregated reporting"],
   environment: ["Environmental data entry", "Surveillance inputs · Transmission conditions"],
   supply: ["Supply telemetry", "Resource inputs · Facility stock"],
-  ai: ["AI incident analyst", "Live intelligence · OpenAI Responses API"]
+  ai: ["AI operations analyst", "Live intelligence · OpenAI Responses API"]
 };
 const importSchemas = {
   clinical: {
@@ -303,12 +303,13 @@ function hydrateDataForms() {
   const zoneLabel = (zone) => `${zone.name} · ${zone.subcounty}`;
   fillSelect("#clinical-zone", state.dataset.zones, zoneLabel);
   fillSelect("#environment-zone", state.dataset.zones, zoneLabel);
-  fillSelect("#ai-zone", state.dataset.zones, zoneLabel, state.dashboard?.assessments?.[0]?.zoneId);
+  fillSelect("#ai-scope", [{ id: "network", name: "County network", subcounty: "High-level review" }, ...state.dataset.zones], zoneLabel);
   fillSelect("#supply-clinic", state.dataset.clinics, (clinic) => `${clinic.name} · ${state.dataset.zones.find((zone) => zone.id === clinic.zoneId)?.name ?? clinic.zoneId}`);
   const updated = `Updated ${formatTime(state.dataset.metadata.updatedAt)}`;
   $("#clinical-updated").textContent = updated;
   $("#environment-updated").textContent = updated;
   $("#supply-updated").textContent = updated;
+  $("#ai-data-source").textContent = `${state.dataset.metadata.reportingWeek} · ${updated.toLowerCase()} · ${state.dataset.metadata.mode === "operator-entry" ? "operator data" : "demonstration data"}`;
   renderClinicalForm();
   renderEnvironmentForm();
   renderSupplyForm();
@@ -325,13 +326,33 @@ async function loadAIStatus() {
     state.aiStatus = await api("/api/ai/status");
     const status = $("#ai-connection");
     status.classList.toggle("connected", state.aiStatus.configured);
-    status.innerHTML = `<i></i>${state.aiStatus.configured ? "API connected" : "API key not configured"}`;
+    status.innerHTML = `<i></i>${state.aiStatus.configured ? "AI analyst ready" : "API key not configured"}`;
     $("#ai-model").textContent = state.aiStatus.model;
     $("#key-guidance").classList.toggle("hidden", state.aiStatus.configured);
     $("#ai-submit").disabled = !state.aiStatus.configured;
   } catch (error) {
     toast(error.message);
   }
+}
+
+function renderAIReview(brief) {
+  const review = brief.review;
+  const findings = review.keyFindings.map((finding) => `<article class="ai-finding"><strong>${escapeHtml(finding.title)}</strong><p>${escapeHtml(finding.evidence)}</p><span>${escapeHtml(finding.implication)}</span></article>`).join("");
+  const priorities = [...review.priorities].sort((a, b) => a.rank - b.rank).map((priority) => `<article class="ai-priority"><span class="ai-priority-rank">${priority.rank}</span><div><div class="ai-priority-title"><strong>${escapeHtml(priority.action)}</strong>${priority.requiresApproval ? '<span class="approval-chip">Approval required</span>' : ""}</div><p>${escapeHtml(priority.rationale)}</p><small>${escapeHtml(priority.owner)} · ${escapeHtml(priority.timeframe)}</small></div></article>`).join("");
+  const concerns = review.dataQuality.concerns.length
+    ? review.dataQuality.concerns.map((concern) => `<li>${escapeHtml(concern)}</li>`).join("")
+    : "<li>No additional data-quality concern was identified in the supplied snapshot.</li>";
+  const limitations = review.limitations.length
+    ? review.limitations.map((limitation) => `<li>${escapeHtml(limitation)}</li>`).join("")
+    : "<li>No additional limitation was returned.</li>";
+  const answer = $("#ai-answer");
+  answer.className = "ai-answer ai-review";
+  answer.innerHTML = `<section class="ai-review-hero" style="${riskStyle(review.overallRisk)}"><div class="ai-review-heading"><span class="risk-badge" style="${riskStyle(review.overallRisk)}">${escapeHtml(review.overallRisk)} overall risk</span><span>${escapeHtml(brief.scope.label)}</span></div><h3>${escapeHtml(review.headline)}</h3><p>${escapeHtml(review.executiveSummary)}</p></section>
+    <section class="ai-review-section"><div class="ai-section-title"><span>01</span><h4>Key findings</h4></div><div class="ai-findings">${findings}</div></section>
+    <section class="ai-review-section"><div class="ai-section-title"><span>02</span><h4>Ranked priorities</h4></div><div class="ai-priorities">${priorities}</div></section>
+    <section class="ai-review-section"><div class="ai-section-title"><span>03</span><h4>Data quality and limitations</h4></div><div class="ai-quality-grid"><div><strong>Freshness</strong><p>${escapeHtml(review.dataQuality.freshness)}</p></div><div><strong>Completeness</strong><p>${escapeHtml(review.dataQuality.completeness)}</p></div></div><div class="ai-caveats"><div><strong>Data concerns</strong><ul>${concerns}</ul></div><div><strong>Interpretation limits</strong><ul>${limitations}</ul></div></div></section>
+    <footer class="ai-review-source">Based on aggregate data updated ${escapeHtml(formatTime(brief.sourceUpdatedAt))}. This review is decision support, not an outbreak declaration or authorization to act.</footer>`;
+  $("#ai-generated").textContent = `${brief.model} · ${formatTime(brief.generatedAt)}`;
 }
 
 function zoneReviewHtml(assessment) {
@@ -539,6 +560,11 @@ $("#supply-form").addEventListener("submit", (event) => {
   }), "Supply telemetry saved and readiness recalculated");
 });
 
+document.querySelectorAll("[data-ai-prompt]").forEach((button) => button.addEventListener("click", () => {
+  $("#ai-question").value = button.dataset.aiPrompt;
+  $("#ai-question").focus();
+}));
+
 $("#ai-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = $("#ai-submit");
@@ -549,11 +575,9 @@ $("#ai-form").addEventListener("submit", async (event) => {
   try {
     const brief = await api("/api/ai/brief", {
       method: "POST",
-      body: JSON.stringify({ zoneId: $("#ai-zone").value, question: $("#ai-question").value })
+      body: JSON.stringify({ scope: $("#ai-scope").value, question: $("#ai-question").value })
     });
-    answer.className = "ai-answer";
-    answer.textContent = brief.text;
-    $("#ai-generated").textContent = `${brief.model} · ${formatTime(brief.generatedAt)}`;
+    renderAIReview(brief);
   } catch (error) {
     answer.className = "ai-answer empty";
     answer.innerHTML = `<div class="ai-empty-mark">!</div><strong>Analysis unavailable</strong><p>${escapeHtml(error.message)}</p>`;

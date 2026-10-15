@@ -8,12 +8,14 @@
     "node": ">=24"
   },
   "scripts": {
+    "dashboard": "python3 -m streamlit run streamlit_app.py",
     "dev": "node --watch src/server.mjs",
     "demo": "node src/server.mjs",
     "dev:agent": "eve dev",
     "build:agent": "eve build",
     "start:agent": "eve start",
     "test": "node tests/engine.test.mjs",
+    "test:python": "python3 -m unittest discover -s tests -p 'test_python_*.py'",
     "check": "node --check src/server.mjs && node --check src/ai.mjs && node --check src/config.mjs && node --check src/domain/engine.mjs && node --check src/domain/imports.mjs && node --check src/domain/store.mjs && node --check public/app.js"
   },
   "dependencies": {

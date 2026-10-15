@@ -250,22 +250,24 @@
 
           <section class="view" data-view-panel="ai">
             <div class="workspace-intro">
-              <div><p class="eyebrow">Live OpenAI analysis</p><h2>AI incident analyst</h2><p>Generate a fresh operational brief from the latest saved clinical, environmental, and supply data.</p></div>
+              <div><p class="eyebrow">Live OpenAI analysis</p><h2>AI operations analyst</h2><p>Generate a high-level management review from the latest saved clinical, environmental, and supply data.</p></div>
               <span class="ai-connection" id="ai-connection"><i></i>Checking configuration</span>
             </div>
             <div class="ai-layout">
               <form class="panel ai-controls" id="ai-form">
-                <div class="panel-header"><div><p class="eyebrow">Analysis request</p><h2>Ask the response analyst</h2></div><span class="model-pill" id="ai-model">—</span></div>
+                <div class="panel-header"><div><p class="eyebrow">Analysis request</p><h2>Review the current situation</h2></div><span class="model-pill" id="ai-model">—</span></div>
                 <div class="form-body">
-                  <label class="field field-wide"><span>Micro-zone</span><select id="ai-zone" required></select></label>
-                  <label class="field field-wide"><span>Operational question</span><textarea id="ai-question" rows="5" maxlength="1000" placeholder="What should the county response team prioritize in the next 24 hours?"></textarea></label>
+                  <label class="field field-wide"><span>Review scope</span><select id="ai-scope" required></select></label>
+                  <div class="field field-wide"><span>Suggested reviews</span><div class="ai-presets"><button type="button" data-ai-prompt="Give a high-level county review and identify the most urgent priorities for the next 24 hours.">Executive overview</button><button type="button" data-ai-prompt="Compare all zones, explain the strongest risk signals, and identify which alerts need verification first.">Risk comparison</button><button type="button" data-ai-prompt="Review supply readiness across the network and rank the most important stock actions.">Supply readiness</button><button type="button" data-ai-prompt="Review data freshness, completeness, and any gaps that could change the operational interpretation.">Data quality</button></div></div>
+                  <label class="field field-wide"><span>Operational question · optional</span><textarea id="ai-question" rows="4" maxlength="1000" placeholder="What should the county response team prioritize in the next 24 hours?"></textarea></label>
+                  <div class="ai-data-source field-wide"><span class="live-dot"></span><div><strong>Uses the latest saved snapshot</strong><span id="ai-data-source">Waiting for operational data</span></div></div>
                   <div class="key-guidance field-wide" id="key-guidance"><strong>Server-side key required</strong><span>Add <code>OPENAI_API_KEY</code> to <code>.env.local</code>, then restart the server. The key is never returned to this page.</span></div>
                 </div>
-                <div class="form-actions"><p>AI output remains decision support and requires human validation.</p><button class="button button-primary" id="ai-submit" type="submit">✦ Generate live brief</button></div>
+                <div class="form-actions"><p>The review is regenerated from current data and remains decision support.</p><button class="button button-primary" id="ai-submit" type="submit">✦ Generate high-level review</button></div>
               </form>
               <article class="panel ai-output">
-                <div class="panel-header"><div><p class="eyebrow">Generated response</p><h2>Incident brief</h2></div><span class="source-stamp" id="ai-generated">Not generated</span></div>
-                <div class="ai-answer empty" id="ai-answer"><div class="ai-empty-mark">✦</div><strong>Ready when your data is ready</strong><p>Select a zone and generate a brief. The model receives only the aggregated snapshot shown in this system.</p></div>
+                <div class="panel-header"><div><p class="eyebrow">Generated response</p><h2>Executive operations review</h2></div><span class="source-stamp" id="ai-generated">Not generated</span></div>
+                <div class="ai-answer empty" id="ai-answer" aria-live="polite"><div class="ai-empty-mark">✦</div><strong>Ready to review your operational data</strong><p>Generate a county-wide overview or select one micro-zone. The model receives only the latest aggregate snapshot saved in this system.</p></div>
               </article>
             </div>
           </section>

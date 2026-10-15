@@ -4,6 +4,20 @@ import { createAIIncidentBrief } from "../src/ai.mjs";
 import { assessZone, buildNetworkSnapshot, draftAdvisories, loadSeedData, planResources, runResponseCycle } from "../src/domain/engine.mjs";
 import { applyParsedImport, parseDataImport } from "../src/domain/imports.mjs";
 
+const SAMPLE_AI_REVIEW = {
+  headline: "Elevated transmission signal requires verification",
+  overallRisk: "high",
+  executiveSummary: "The latest aggregate data indicate one priority zone and constrained local supplies.",
+  keyFindings: [
+    { title: "Cases are rising", evidence: "Nyakach North reports 68 latest-week cases.", implication: "Verify the signal before escalation." }
+  ],
+  priorities: [
+    { rank: 1, action: "Verify facility reports", owner: "Surveillance lead", timeframe: "Within 4 hours", rationale: "Confirm the aggregate signal.", requiresApproval: false }
+  ],
+  dataQuality: { freshness: "Updated this reporting week.", completeness: "94% complete.", concerns: ["Confirm late reports."] },
+  limitations: ["The risk score is not an outbreak declaration."]
+};
+
 test("risk assessment flags the seeded Nyakach spike", () => {
   const dataset = loadSeedData();
   const zone = dataset.zones.find((item) => item.id === "nyakach-north");
@@ -61,13 +75,13 @@ test("network snapshot reports internally consistent totals", () => {
   assert.ok(snapshot.summary.stock.rdt > 0);
 });
 
-test("live AI brief uses the Responses API without storing the aggregate snapshot", async () => {
+test("live AI review uses structured Responses output without storing the aggregate snapshot", async () => {
   let request;
   const brief = await createAIIncidentBrief({
     dataset: loadSeedData(),
     zoneId: "nyakach-north",
     question: "What needs attention?",
-    apiKey: "test-key",
+    apiKey: "sk-test-key-not-a-real-secret-12345",
     model: "gpt-6-astra",
     fetchImpl: async (url, options) => {
       request = { url, options, body: JSON.parse(options.body) };
@@ -77,7 +91,7 @@ test("live AI brief uses the Responses API without storing the aggregate snapsho
         async json() {
           return {
             id: "resp_test",
-            output: [{ type: "message", content: [{ type: "output_text", text: "Review the critical signal." }] }]
+            output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(SAMPLE_AI_REVIEW) }] }]
           };
         }
       };
@@ -86,9 +100,40 @@ test("live AI brief uses the Responses API without storing the aggregate snapsho
   assert.equal(request.url, "https://api.openai.com/v1/responses");
   assert.equal(request.body.model, "gpt-6-astra");
   assert.equal(request.body.store, false);
+  assert.equal(request.body.reasoning.effort, "medium");
+  assert.equal(request.body.text.format.type, "json_schema");
+  assert.equal(request.body.text.format.strict, true);
   assert.match(request.body.input, /Nyakach North/);
-  assert.equal(brief.text, "Review the critical signal.");
+  assert.equal(brief.review.headline, SAMPLE_AI_REVIEW.headline);
+  assert.match(brief.text, /Elevated transmission signal/);
   assert.equal(brief.responseId, "resp_test");
+});
+
+test("network AI review receives updated operator data from every zone and facility", async () => {
+  const dataset = loadSeedData();
+  dataset.zones.find((zone) => zone.id === "kisumu-west").weeklyCases = [19, 17, 20, 18, 21, 99];
+  dataset.metadata.mode = "operator-entry";
+  let requestBody;
+  const brief = await createAIIncidentBrief({
+    dataset,
+    zoneId: "network",
+    apiKey: "sk-test-key-not-a-real-secret-12345",
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { id: "resp_network", output_text: JSON.stringify(SAMPLE_AI_REVIEW) };
+        }
+      };
+    }
+  });
+  assert.match(requestBody.input, /Kisumu County network/);
+  assert.match(requestBody.input, /"currentCases":99/);
+  assert.match(requestBody.input, /Jaramogi Oginga Odinga Teaching & Referral Hospital/);
+  assert.equal(brief.scope.type, "network");
+  assert.equal(brief.sourceMode, "operator-entry");
 });
 
 test("clinical CSV imports validate and update matching zones atomically", () => {

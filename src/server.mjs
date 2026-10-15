@@ -75,9 +75,10 @@ export function createAppServer() {
 
       if (request.method === "POST" && url.pathname === "/api/ai/brief") {
         const input = await readJson(request);
+        const scope = typeof input.scope === "string" && input.scope ? input.scope : typeof input.zoneId === "string" && input.zoneId ? input.zoneId : "network";
         const brief = await createAIIncidentBrief({
           dataset: getOperationalData(),
-          zoneId: String(input.zoneId || ""),
+          zoneId: scope.slice(0, 100),
           question: typeof input.question === "string" ? input.question.slice(0, 1_000) : ""
         });
         return json(response, 200, brief);
