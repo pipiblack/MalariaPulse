@@ -23,6 +23,7 @@ from malariapulse.core import (
     parse_data_import,
     update_clinical,
     update_environment,
+    update_interventions,
     update_supply,
 )
 from malariapulse.report import ai_report_filename, build_ai_report_pdf, report_jurisdiction
@@ -224,6 +225,7 @@ def _render_file_upload(kind: str, dataset: dict[str, Any], *, key_prefix: str, 
     kind_labels = {
         "clinical": "Clinical surveillance",
         "environment": "Environmental observations",
+        "intervention": "Intervention coverage",
         "supply": "Facility supply telemetry",
     }
     label = kind_labels[kind]
@@ -314,7 +316,24 @@ def _render_cycle(cycle: dict[str, Any] | None) -> None:
                     f"projected next-week cases **{assessment['expectedCasesNextWeek']}**",
                     unsafe_allow_html=True,
                 )
+                st.markdown("**1. Why this draft was generated**")
+                st.write(
+                    f"The surveillance agent detected a {assessment['riskLevel']} operational signal: "
+                    f"cases changed by {assessment['growthPct']}%, test positivity is {assessment['positivityPct']}%, "
+                    f"and the model projects {assessment['expectedCasesNextWeek']} cases next week. "
+                    "These values require verification; they do not by themselves confirm an outbreak."
+                )
+                if assessment.get("priorityFlags"):
+                    for flag in assessment["priorityFlags"]:
+                        st.warning(flag, icon="⚠️")
+
                 supply_plan = intervention["supplyPlan"]
+                st.markdown("**2. Supply and redistribution draft**")
+                readiness_col, movement_col, request_col = st.columns(3)
+                readiness_col.metric("Projected readiness", f"{supply_plan['readinessPct']}%")
+                movement_col.metric("Proposed movements", len(supply_plan["recommendations"]))
+                request_col.metric("Unresolved restocks", len(supply_plan["restockRequests"]))
+                st.write(supply_plan.get("method", "The plan estimates a three-week safety-stock requirement."))
                 st.caption(supply_plan["note"])
                 if supply_plan["recommendations"]:
                     moves = pd.DataFrame(
@@ -325,20 +344,67 @@ def _render_cycle(cycle: dict[str, Any] | None) -> None:
                                 "From": move["fromClinic"],
                                 "To": move["toClinic"],
                                 "ETA (min)": move["etaMinutes"],
+                                "Receiver before": move.get("receiverWeeksBefore"),
+                                "Receiver after": move.get("receiverWeeksAfter"),
+                                "Donor after": move.get("donorWeeksAfter"),
+                                "Reason": move.get("rationale", "Restore safety stock."),
                             }
                             for move in supply_plan["recommendations"]
                         ]
                     )
-                    st.dataframe(moves, hide_index=True, width="stretch")
+                    st.dataframe(
+                        moves,
+                        hide_index=True,
+                        width="stretch",
+                        column_config={
+                            "Receiver before": st.column_config.NumberColumn(format="%.1f weeks"),
+                            "Receiver after": st.column_config.NumberColumn(format="%.1f weeks"),
+                            "Donor after": st.column_config.NumberColumn(format="%.1f weeks"),
+                        },
+                    )
                 if supply_plan["restockRequests"]:
                     st.warning(f"{len(supply_plan['restockRequests'])} unresolved county restock request(s) require review.")
+                    restocks = pd.DataFrame(
+                        [
+                            {
+                                "Facility": request["clinic"],
+                                "Resource": request["resourceLabel"],
+                                "Quantity still needed": request["quantity"],
+                                "Stock on hand": request.get("stockOnHand"),
+                                "Weekly use": request.get("weeklyUse"),
+                                "Coverage": request.get("coverageWeeks"),
+                                "Priority": request["priority"].title(),
+                            }
+                            for request in supply_plan["restockRequests"]
+                        ]
+                    )
+                    st.dataframe(
+                        restocks,
+                        hide_index=True,
+                        width="stretch",
+                        column_config={"Coverage": st.column_config.NumberColumn(format="%.1f weeks")},
+                    )
+
+                advisories = intervention["advisories"]
+                st.markdown("**3. Community communication drafts**")
+                st.write(advisories.get("summary", "Draft messages are prepared for local review."))
+                st.caption(advisories["clinicalSafety"])
                 message_tabs = st.tabs(
-                    [f"{message['audience'].title()} · {message['language']}" for message in intervention["advisories"]["messages"]]
+                    [f"{message['audience'].title()} · {message['language']}" for message in advisories["messages"]]
                 )
-                for message_tab, message in zip(message_tabs, intervention["advisories"]["messages"]):
+                for message_tab, message in zip(message_tabs, advisories["messages"]):
                     with message_tab:
-                        st.write(message["text"])
-                        st.caption(f"{message['characters']} characters · {message['segments']} SMS segment(s) · draft only")
+                        st.write(f"**Purpose:** {message.get('purpose', 'Provide approved prevention and referral guidance.')}" )
+                        st.write(f"**Why this audience:** {message.get('reason', advisories.get('summary', 'Targeted operational alert.'))}")
+                        st.info(message["text"])
+                        st.write(f"**Delivery note:** {message.get('deliveryNotes', 'Release only after county approval.')}" )
+                        with st.expander("Reviewer checklist"):
+                            for check in message.get("reviewChecklist", ["Confirm wording, audience, timing, and approver."]):
+                                st.write(f"• {check}")
+                        st.caption(
+                            f"{message['channel']} · {message['characters']} characters · "
+                            f"{message['segments']} SMS segment(s) · draft only"
+                        )
     else:
         st.success("No high or critical threshold was crossed. Continue surveillance.")
 
@@ -441,9 +507,10 @@ ai_status = get_ai_status(api_key=api_key, model=api_model)
 
 page_copy = {
     "Overview": ("Malaria operations command view", "Surveillance signals, county priorities, and multi-agent response drafts."),
-    "Bulk data upload": ("Bulk data upload", "Validate and apply aggregate clinical, environmental, or supply files."),
+    "Bulk data upload": ("Bulk data upload", "Validate and apply aggregate clinical, environmental, intervention, or supply files."),
     "Clinical data": ("Clinical surveillance entry", "Correct one micro-zone or use bulk upload for routine reporting."),
-    "Environmental data": ("Environmental observation entry", "Update rainfall, temperature, and humidity by micro-zone."),
+    "Environmental data": ("Environmental observation entry", "Update rainfall, temperature, flooding, and standing-water signals by micro-zone."),
+    "Intervention data": ("Intervention coverage entry", "Track the latest prevention coverage context by micro-zone."),
     "Supply data": ("Facility supply entry", "Review and update facility stock and average weekly use."),
     "AI analyst": ("AI operations analyst", "Generate an evidence-grounded review from the latest saved data."),
 }
@@ -470,10 +537,11 @@ with st.sidebar:
     st.divider()
     st.markdown('<div class="mp-side-label">AI analyst</div>', unsafe_allow_html=True)
     if ai_status["configured"]:
-        st.success(f"Connected · {ai_status['model']}")
+        st.success(f"Configured · {ai_status['model']}")
+        st.caption("The key is verified only when a live review succeeds.")
     else:
         st.warning("Gemini key not configured")
-        st.caption("Add GEMINI_API_KEY to .env.local or .streamlit/secrets.toml, then restart.")
+        st.caption("Cloud: Manage app → Settings → Secrets. Local: add the key to .env.local.")
     st.divider()
     st.caption("Aggregate operational data only. Never upload names, phone numbers, patient IDs, or addresses.")
 
@@ -492,10 +560,28 @@ _render_flash(active_page)
 if active_page == "Overview":
     summary = snapshot["summary"]
     first, second, third, fourth = st.columns(4)
-    first.metric("Zones monitored", summary["zonesMonitored"])
-    second.metric("High / critical", summary["highRiskZones"], help="Zones scoring 60 or higher")
-    third.metric("Facilities reporting", summary["facilitiesReporting"])
-    fourth.metric("Supply readiness", f"{summary['supplyReadinessPct']}%", help="Average three-week stock coverage, capped at 100%")
+    first.metric(
+        "Latest reported cases",
+        summary["currentCases"],
+        f"{summary['caseChangePct']}% vs previous week",
+        delta_color="inverse",
+        help="Sum of the latest weekly aggregate case count across monitored micro-zones.",
+    )
+    second.metric(
+        "Network test positivity",
+        f"{summary['positivityPct']}%",
+        f"{summary['positiveTests']} of {summary['tests']} tests",
+        delta_color="off",
+        help="Confirmed positive tests divided by all malaria tests in the current reporting period.",
+    )
+    third.metric("High / critical zones", summary["highRiskZones"], help="Zones with an operational score of 60 or higher.")
+    fourth.metric(
+        "Facilities below 3 weeks",
+        summary["facilitiesBelowThreeWeeks"],
+        help="Facilities where at least one tracked malaria commodity has less than three weeks of coverage.",
+    )
+    if dataset["metadata"].get("mode") == "demonstration":
+        st.caption("Demonstration data are shown. Replace them through the sidebar entry pages or validated file uploads before operational use.")
 
     focus_col, action_col = st.columns([2, 1])
     with focus_col:
@@ -516,11 +602,33 @@ if active_page == "Overview":
             create_cycle(None if cycle_scope == "network" else cycle_scope)
             st.rerun()
 
+    st.subheader("County transmission pattern")
+    county_trend = pd.DataFrame(
+        {
+            zone["name"]: zone["weeklyCases"]
+            for zone in dataset["zones"]
+        },
+        index=["W-5", "W-4", "W-3", "W-2", "W-1", "Current"],
+    )
+    trend_col, rank_col = st.columns([3, 2])
+    with trend_col:
+        st.line_chart(county_trend, height=310)
+        st.caption("Six-week reported case trajectories. Compare direction and persistence, not only the latest total.")
+    with rank_col:
+        risk_rank = pd.DataFrame(
+            {
+                "Micro-zone": [item["zoneName"] for item in reversed(snapshot["assessments"])],
+                "Risk score": [item["score"] for item in reversed(snapshot["assessments"])],
+            }
+        ).set_index("Micro-zone")
+        st.bar_chart(risk_rank, horizontal=True, color="#246bfd", height=310)
+        st.caption("Operational score from 0–100. Scores at or above 60 enter the high/critical response queue.")
+
     selected_zone = next(zone for zone in dataset["zones"] if zone["id"] == selected_zone_id)
     assessment = assess_zone(selected_zone, dataset["metadata"])
+    st.subheader(f"Micro-zone detail · {selected_zone['name']}")
     chart_col, signal_col = st.columns([3, 2])
     with chart_col:
-        st.subheader(f"Six-week cases · {selected_zone['name']}")
         trend = pd.DataFrame(
             {
                 "Week": ["W-5", "W-4", "W-3", "W-2", "W-1", "Current"],
@@ -530,16 +638,27 @@ if active_page == "Overview":
         st.line_chart(trend, color="#246bfd")
         st.caption(
             f"{selected_zone['tests']} tests · {selected_zone['positiveTests']} positive · "
-            f"{assessment['positivityPct']}% positivity · {assessment['incidencePerThousand']} cases per 1,000"
+            f"{assessment['positivityPct']}% positivity · {assessment['testingCoveragePct']}% of suspected cases tested · "
+            f"{assessment['incidencePerThousand']} cases per 1,000"
         )
     with signal_col:
-        st.subheader("Risk signal")
         st.markdown(f"{_risk_chip(assessment['riskLevel'])}", unsafe_allow_html=True)
         st.metric("Risk score", f"{assessment['score']} / 100", f"{assessment['growthPct']}% case acceleration")
         st.write(assessment["recommendation"])
         st.caption(f"Expected next week: {assessment['expectedCasesNextWeek']} cases · confidence {assessment['confidence']:.0%}")
         for driver in assessment["drivers"]:
             st.progress(min(driver["contribution"] / 40, 1.0), text=f"{driver['label']} · {driver['contribution']} points")
+
+    clinical = assessment["clinicalContext"]
+    environment = assessment["environmentContext"]
+    context_first, context_second, context_third, context_fourth = st.columns(4)
+    context_first.metric("Severe cases", clinical["severeCases"], f"{clinical['admissions']} admitted", delta_color="off")
+    context_second.metric("Priority-group cases", clinical["under5ConfirmedCases"] + clinical["pregnancyConfirmedCases"], f"{clinical['under5ConfirmedCases']} under 5 · {clinical['pregnancyConfirmedCases']} pregnancy", delta_color="off")
+    context_third.metric("Reporting completeness", f"{clinical['reportingCompletenessPct']}%", help="Facilities expected to report versus reports received for this zone.")
+    context_fourth.metric("30-day rainfall", f"{environment['rainfall30dMm']} mm", f"Standing water {environment['standingWaterIndex']}/100", delta_color="off")
+    if assessment["priorityFlags"]:
+        st.write("**Attention flags**")
+        st.write(" · ".join(assessment["priorityFlags"]))
 
     st.subheader("County risk watchlist")
     risk_rows = pd.DataFrame(
@@ -551,21 +670,149 @@ if active_page == "Overview":
                 "Score": item["score"],
                 "Latest cases": item["currentCases"],
                 "Projected": item["expectedCasesNextWeek"],
-                "Growth": f"{item['growthPct']}%",
-                "Positivity": f"{item['positivityPct']}%",
+                "Growth (%)": item["growthPct"],
+                "Positivity (%)": item["positivityPct"],
+                "Testing (%)": item["testingCoveragePct"],
+                "Reporting (%)": item["clinicalContext"]["reportingCompletenessPct"],
+                "Attention flags": "; ".join(item["priorityFlags"]) or "Routine monitoring",
             }
             for item in snapshot["assessments"]
         ]
     )
-    st.dataframe(risk_rows, hide_index=True, width="stretch")
+    st.dataframe(
+        risk_rows,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Score": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d"),
+            "Growth (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            "Positivity (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            "Testing (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            "Reporting (%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%"),
+        },
+    )
+
+    st.subheader("Clinical severity and priority groups")
+    clinical_rows = pd.DataFrame(
+        [
+            {
+                "Micro-zone": item["zoneName"],
+                "Suspected": item["clinicalContext"]["suspectedCases"],
+                "Tested": next(zone["tests"] for zone in dataset["zones"] if zone["id"] == item["zoneId"]),
+                "Latest cases": item["currentCases"],
+                "Severe": item["clinicalContext"]["severeCases"],
+                "Admissions": item["clinicalContext"]["admissions"],
+                "Deaths": item["clinicalContext"]["deaths"],
+                "Under 5": item["clinicalContext"]["under5ConfirmedCases"],
+                "Pregnancy": item["clinicalContext"]["pregnancyConfirmedCases"],
+                "CHW referrals": item["clinicalContext"]["chwFeverReferrals"],
+            }
+            for item in snapshot["assessments"]
+        ]
+    )
+    st.dataframe(clinical_rows, hide_index=True, width="stretch")
+    st.caption("Aggregate counts only. Severe cases, admissions, deaths, and priority-group cases support response planning but are not currently included in the risk score.")
+
+    st.subheader("Climate and prevention context")
+    climate_col, prevention_col = st.columns(2)
+    with climate_col:
+        climate_chart = pd.DataFrame(
+            {
+                "Micro-zone": [zone["name"] for zone in dataset["zones"]],
+                "30-day rainfall (mm)": [zone["environment"]["rainfall30dMm"] for zone in dataset["zones"]],
+            }
+        ).set_index("Micro-zone")
+        st.bar_chart(climate_chart, color="#246bfd", height=300)
+        climate_rows = pd.DataFrame(
+            [
+                {
+                    "Micro-zone": zone["name"],
+                    "Rainfall 7d (mm)": zone["environment"]["rainfall7dMm"],
+                    "Rainfall 30d (mm)": zone["environment"]["rainfall30dMm"],
+                    "Humidity (%)": zone["environment"]["humidityPct"],
+                    "Standing water": zone["environment"]["standingWaterIndex"],
+                    "Flooded sites": zone["environment"]["floodedSites"],
+                }
+                for zone in dataset["zones"]
+            ]
+        )
+        st.dataframe(climate_rows, hide_index=True, width="stretch")
+    with prevention_col:
+        prevention_chart = pd.DataFrame(
+            {
+                "Micro-zone": [zone["name"] for zone in dataset["zones"]],
+                "LLIN use": [zone["interventions"]["llinUsePct"] for zone in dataset["zones"]],
+                "IPTp3": [zone["interventions"]["iptp3CoveragePct"] for zone in dataset["zones"]],
+                "Vaccine dose 4": [zone["interventions"]["vaccineDose4CoveragePct"] for zone in dataset["zones"]],
+                "Larval sites managed": [zone["interventions"]["larvalSitesManagedPct"] for zone in dataset["zones"]],
+            }
+        ).set_index("Micro-zone")
+        st.bar_chart(
+            prevention_chart,
+            color=["#246bfd", "#14865f", "#e49b24", "#647188"],
+            height=300,
+        )
+        st.dataframe(
+            prevention_chart.reset_index(),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                column: st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%")
+                for column in prevention_chart.columns
+            },
+        )
+    st.caption("Coverage indicators have different eligible denominators and update cycles. Compare each indicator across zones; do not add or average them together.")
+
+    st.subheader("Commodity readiness")
+    supply_rows = []
+    for clinic in dataset["clinics"]:
+        coverage = {
+            resource: round(clinic["stock"][resource] / clinic["weeklyUse"][resource], 1)
+            if clinic["weeklyUse"][resource] > 0
+            else None
+            for resource in ("rdt", "act", "nets")
+        }
+        supply_rows.append(
+            {
+                "Facility": clinic["name"],
+                "Micro-zone": zone_names[clinic["zoneId"]],
+                "RDT weeks": coverage["rdt"],
+                "ACT weeks": coverage["act"],
+                "Net weeks": coverage["nets"],
+                "Lowest coverage": min(value for value in coverage.values() if value is not None),
+            }
+        )
+    supply_frame = pd.DataFrame(supply_rows).sort_values("Lowest coverage")
+    supply_chart = supply_frame[["Facility", "Lowest coverage"]].set_index("Facility")
+    st.bar_chart(supply_chart, horizontal=True, color="#e6534c", height=320)
+    st.dataframe(
+        supply_frame,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "RDT weeks": st.column_config.NumberColumn(format="%.1f weeks"),
+            "ACT weeks": st.column_config.NumberColumn(format="%.1f weeks"),
+            "Net weeks": st.column_config.NumberColumn(format="%.1f weeks"),
+            "Lowest coverage": st.column_config.NumberColumn(format="%.1f weeks"),
+        },
+    )
 
     with st.expander("Latest multi-agent response cycle", expanded=latest_cycle() is not None):
         _render_cycle(latest_cycle())
 
-    with st.expander("Data source and scoring notes"):
+    with st.expander("Indicator definitions, sources, and scoring notes"):
         st.write(
             "The displayed risk score is a deterministic operational signal combining six-week case acceleration (40%), "
             "test positivity (23%), 7-day rainfall (16%), humidity (11%), and temperature suitability (10%)."
+        )
+        st.write(
+            "Additional Western Kenya decision context now includes severe cases, admissions, malaria deaths, cases in children under 5 and pregnancy, "
+            "CHW fever referrals, reporting completeness, 30-day rainfall, standing-water observations, flooded sites, LLIN use, IPTp3 coverage, "
+            "malaria vaccine dose 4 coverage, and larval-site management. These contextual fields are displayed separately and are not scored until calibrated."
+        )
+        st.write(
+            "Recommended future feeds, when governed sources become available: vector density and species, human biting rate, insecticide susceptibility/resistance, "
+            "IRS coverage in targeted areas, diagnostic quality assurance, facility reporting timeliness, population movement, and geospatial land-cover or water-body indicators."
         )
         st.write(
             f"Source mode: **{dataset['metadata'].get('mode', 'unknown')}** · reporting week: "
@@ -573,9 +820,20 @@ if active_page == "Overview":
             f"**{dataset['metadata'].get('dataCompleteness', 0):.0%}**."
         )
         st.warning("This is an uncalibrated MVP signal, not a confirmed outbreak, diagnostic system, or autonomous dispatch decision.")
+        st.markdown(
+            "Sources: [Kenya Malaria Strategy 2023–2027](https://extranet.who.int/cpcd/sites/default/files/public_file_repository/KEN_Kenya_National-Malaria-Strategy_2023-2027.pdf) · "
+            "[WHO malaria surveillance indicators](https://www.who.int/publications/m/item/core-indicators-for-malaria-surveillance-monitoring-and-evaluation) · "
+            "[Kenya DHS 2022](https://www.knbs.or.ke/reports/kdhs-2022/) · "
+            "[WHO Kenya malaria profile 2025](https://cdn.who.int/media/docs/default-source/malaria/country-profiles/2025/malaria-2025-ken.pdf)"
+        )
 
 elif active_page == "Bulk data upload":
-    kind_labels = {"clinical": "Clinical surveillance", "environment": "Environmental observations", "supply": "Facility supply telemetry"}
+    kind_labels = {
+        "clinical": "Clinical surveillance",
+        "environment": "Environmental observations",
+        "intervention": "Intervention coverage",
+        "supply": "Facility supply telemetry",
+    }
     upload_kind = st.selectbox("Data type", list(kind_labels), format_func=kind_labels.get, key="upload-kind")
     _render_file_upload(upload_kind, dataset, key_prefix=f"bulk-{upload_kind}", return_page="Bulk data upload")
 
@@ -585,6 +843,7 @@ elif active_page == "Clinical data":
         st.caption("Use this form for a single-zone correction.")
         clinical_zone_id = st.selectbox("Micro-zone", list(zone_names), format_func=zone_names.get, key="clinical-zone")
         clinical_zone = next(zone for zone in dataset["zones"] if zone["id"] == clinical_zone_id)
+        clinical_context = clinical_zone["clinical"]
         with st.form(f"clinical-form-{clinical_zone_id}"):
             reporting_week = st.text_input("Reporting week", value=dataset["metadata"]["reportingWeek"], help="Format: YYYY-Www")
             week_columns = st.columns(3)
@@ -597,10 +856,70 @@ elif active_page == "Clinical data":
             tests_col, positive_col = st.columns(2)
             tests = tests_col.number_input("Tests performed", min_value=0, value=int(clinical_zone["tests"]), step=1)
             positive_tests = positive_col.number_input("Positive tests", min_value=0, value=int(clinical_zone["positiveTests"]), step=1)
+            st.markdown("**Severity, priority groups, and surveillance performance**")
+            severity_columns = st.columns(4)
+            suspected_cases = severity_columns[0].number_input(
+                "Suspected malaria cases",
+                min_value=0,
+                value=int(clinical_context["suspectedCases"]),
+                step=1,
+                help="Fever or suspected-malaria presentations used as the testing-coverage denominator.",
+            )
+            severe_cases = severity_columns[1].number_input(
+                "Severe cases", min_value=0, value=int(clinical_context["severeCases"]), step=1
+            )
+            admissions = severity_columns[2].number_input(
+                "Malaria admissions", min_value=0, value=int(clinical_context["admissions"]), step=1
+            )
+            deaths = severity_columns[3].number_input(
+                "Malaria deaths", min_value=0, value=int(clinical_context["deaths"]), step=1
+            )
+            priority_columns = st.columns(4)
+            under5_cases = priority_columns[0].number_input(
+                "Confirmed cases, under 5",
+                min_value=0,
+                value=int(clinical_context["under5ConfirmedCases"]),
+                step=1,
+            )
+            pregnancy_cases = priority_columns[1].number_input(
+                "Confirmed cases, pregnancy",
+                min_value=0,
+                value=int(clinical_context["pregnancyConfirmedCases"]),
+                step=1,
+            )
+            chw_referrals = priority_columns[2].number_input(
+                "CHW fever referrals",
+                min_value=0,
+                value=int(clinical_context["chwFeverReferrals"]),
+                step=1,
+            )
+            reporting_completeness = priority_columns[3].number_input(
+                "Reporting completeness (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(clinical_context["reportingCompletenessPct"]),
+                step=1.0,
+            )
             submitted = st.form_submit_button("Save clinical data", type="primary", width="stretch")
             if submitted:
                 try:
-                    update_clinical(clinical_zone_id, weekly_cases, tests, positive_tests, reporting_week)
+                    update_clinical(
+                        clinical_zone_id,
+                        weekly_cases,
+                        tests,
+                        positive_tests,
+                        reporting_week,
+                        {
+                            "suspectedCases": suspected_cases,
+                            "severeCases": severe_cases,
+                            "admissions": admissions,
+                            "deaths": deaths,
+                            "under5ConfirmedCases": under5_cases,
+                            "pregnancyConfirmedCases": pregnancy_cases,
+                            "chwFeverReferrals": chw_referrals,
+                            "reportingCompletenessPct": reporting_completeness,
+                        },
+                    )
                     _set_flash(
                         "Clinical data",
                         f"Clinical data for {zone_names[clinical_zone_id]} saved successfully. The dashboard and AI analyst now use these values.",
@@ -623,10 +942,41 @@ elif active_page == "Environmental data":
             rainfall = rain_col.number_input("Rainfall, last 7 days (mm)", min_value=0.0, max_value=2000.0, value=float(environment["rainfall7dMm"]), step=1.0)
             temperature = temp_col.number_input("Mean temperature (°C)", min_value=-10.0, max_value=60.0, value=float(environment["temperatureC"]), step=0.1)
             humidity = humidity_col.number_input("Mean humidity (%)", min_value=0.0, max_value=100.0, value=float(environment["humidityPct"]), step=1.0)
+            exposure_columns = st.columns(3)
+            rainfall_30d = exposure_columns[0].number_input(
+                "Rainfall, last 30 days (mm)",
+                min_value=0.0,
+                max_value=4000.0,
+                value=float(environment["rainfall30dMm"]),
+                step=1.0,
+                help="A longer rainfall window provides context for lagged mosquito breeding and transmission conditions.",
+            )
+            standing_water = exposure_columns[1].number_input(
+                "Standing-water index (0–100)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(environment["standingWaterIndex"]),
+                step=1.0,
+                help="Locally defined observation index; document and use the same field method across zones.",
+            )
+            flooded_sites = exposure_columns[2].number_input(
+                "Flooded or waterlogged sites",
+                min_value=0,
+                value=int(environment["floodedSites"]),
+                step=1,
+            )
             submitted = st.form_submit_button("Save environmental data", type="primary", width="stretch")
             if submitted:
                 try:
-                    update_environment(environment_zone_id, rainfall, temperature, humidity)
+                    update_environment(
+                        environment_zone_id,
+                        rainfall,
+                        temperature,
+                        humidity,
+                        rainfall_30d,
+                        standing_water,
+                        flooded_sites,
+                    )
                     _set_flash(
                         "Environmental data",
                         f"Environmental data for {zone_names[environment_zone_id]} saved successfully. The dashboard and AI analyst now use these values.",
@@ -636,6 +986,100 @@ elif active_page == "Environmental data":
                     st.error(str(error))
     with environment_upload_tab:
         _render_file_upload("environment", dataset, key_prefix="environment-inline", return_page="Environmental data")
+
+elif active_page == "Intervention data":
+    intervention_manual_tab, intervention_upload_tab = st.tabs(["Manual entry", "File upload"])
+    with intervention_manual_tab:
+        st.caption("Enter the latest available coverage estimates. These indicators may update monthly, quarterly, or annually rather than weekly.")
+        intervention_zone_id = st.selectbox(
+            "Micro-zone", list(zone_names), format_func=zone_names.get, key="intervention-zone"
+        )
+        intervention_zone = next(zone for zone in dataset["zones"] if zone["id"] == intervention_zone_id)
+        intervention = intervention_zone["interventions"]
+        with st.form(f"intervention-form-{intervention_zone_id}"):
+            coverage_date = st.text_input(
+                "Coverage reference date", value=intervention["coverageDate"], help="Format: YYYY-MM-DD"
+            )
+            coverage_columns = st.columns(4)
+            llin_use = coverage_columns[0].number_input(
+                "LLIN use (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(intervention["llinUsePct"]),
+                step=1.0,
+                help="Population in the malaria-risk area who slept under a long-lasting insecticidal net.",
+            )
+            iptp3_coverage = coverage_columns[1].number_input(
+                "IPTp3 coverage (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(intervention["iptp3CoveragePct"]),
+                step=1.0,
+                help="Eligible pregnant women receiving at least three doses of intermittent preventive treatment.",
+            )
+            vaccine_dose4 = coverage_columns[2].number_input(
+                "Malaria vaccine dose 4 (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(intervention["vaccineDose4CoveragePct"]),
+                step=1.0,
+                help="Age-eligible children receiving the fourth malaria-vaccine dose.",
+            )
+            larval_sites_managed = coverage_columns[3].number_input(
+                "Larval sites managed (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(intervention["larvalSitesManagedPct"]),
+                step=1.0,
+                help="Locally identified, eligible larval sites covered by the approved management programme.",
+            )
+            submitted = st.form_submit_button("Save intervention data", type="primary", width="stretch")
+            if submitted:
+                try:
+                    update_interventions(
+                        intervention_zone_id,
+                        coverage_date,
+                        llin_use,
+                        iptp3_coverage,
+                        vaccine_dose4,
+                        larval_sites_managed,
+                    )
+                    _set_flash(
+                        "Intervention data",
+                        f"Intervention data for {zone_names[intervention_zone_id]} saved successfully. The dashboard and AI analyst now use these values.",
+                    )
+                    st.rerun()
+                except ValueError as error:
+                    st.error(str(error))
+
+        st.subheader("Current prevention coverage context")
+        intervention_rows = pd.DataFrame(
+            [
+                {
+                    "Micro-zone": zone["name"],
+                    "Reference date": zone["interventions"]["coverageDate"],
+                    "LLIN use (%)": zone["interventions"]["llinUsePct"],
+                    "IPTp3 (%)": zone["interventions"]["iptp3CoveragePct"],
+                    "Vaccine dose 4 (%)": zone["interventions"]["vaccineDose4CoveragePct"],
+                    "Larval sites managed (%)": zone["interventions"]["larvalSitesManagedPct"],
+                }
+                for zone in dataset["zones"]
+            ]
+        )
+        st.dataframe(
+            intervention_rows,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                column: st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%")
+                for column in ("LLIN use (%)", "IPTp3 (%)", "Vaccine dose 4 (%)", "Larval sites managed (%)")
+            },
+        )
+        st.info("These measures use different eligible denominators and reporting periods. Review each measure separately and retain its source date.")
+    with intervention_upload_tab:
+        _render_file_upload(
+            "intervention", dataset, key_prefix="intervention-inline", return_page="Intervention data"
+        )
 
 elif active_page == "Supply data":
     st.caption("Update stock on hand and average weekly use. Quantities are whole units.")
@@ -694,10 +1138,11 @@ elif active_page == "Supply data":
 elif active_page == "AI analyst":
     st.write("Generate a high-level management review from the latest aggregate clinical, environmental, and supply data.")
     if ai_status["configured"]:
-        st.success(f"Google Gemini connected · {ai_status['model']} · key remains server-side")
+        st.success(f"Google Gemini configured · {ai_status['model']} · key remains server-side")
     else:
-        st.warning("The analyst needs GEMINI_API_KEY in .env.local or .streamlit/secrets.toml. Restart Streamlit after adding it.")
-        st.code("GEMINI_API_KEY=your_key_here\nGEMINI_MODEL=gemini-3.8-flash", language="bash")
+        st.warning("The deployed analyst needs a Gemini key in Streamlit Community Cloud secrets.")
+        st.info("Open Manage app → Settings → Secrets, paste the configuration below, save it, then reboot the app. For local use, put the same values in .env.local instead.")
+        st.code('GEMINI_API_KEY = "your_new_key_here"\nGEMINI_MODEL = "gemini-3.8-flash"', language="toml")
 
     ai_scope = st.selectbox(
         "Review scope",

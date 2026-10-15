@@ -23,6 +23,9 @@ Rules:
 - Lead with the operational situation and the most important decision.
 - Compare zones when the scope is the county network; focus on the selected zone when the scope is a micro-zone.
 - Tie every finding to concrete evidence in the supplied snapshot. Never invent case counts, causes, stock levels, dates, or actions.
+- Use severe cases, admissions, deaths, priority-group cases, community referrals, reporting completeness, 30-day rainfall, standing water, and intervention coverage when supplied.
+- Treat intervention coverage and environmental context as decision context unless the snapshot explicitly identifies them as scored risk components.
+- Explain why every proposed action follows from the evidence, what must be verified, and which decision still requires human approval.
 - Distinguish an elevated model signal from a confirmed outbreak. This score is not a clinically validated prediction model.
 - Treat resource movements and public messages as drafts requiring authorized human approval.
 - Never diagnose an individual or prescribe treatment.
@@ -195,7 +198,18 @@ def build_analysis_context(dataset: dict[str, Any], scope_id: str) -> dict[str, 
         "source": dataset["metadata"],
         "zone": {
             key: zone[key]
-            for key in ("id", "name", "subcounty", "population", "weeklyCases", "tests", "positiveTests", "environment")
+            for key in (
+                "id",
+                "name",
+                "subcounty",
+                "population",
+                "weeklyCases",
+                "tests",
+                "positiveTests",
+                "clinical",
+                "environment",
+                "interventions",
+            )
         },
         "assessment": assessment,
         "facilities": [_clinic_context(clinic) for clinic in dataset["clinics"] if clinic["id"] in zone["clinicIds"]],

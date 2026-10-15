@@ -67,6 +67,20 @@ class StreamlitDataEntryTests(unittest.TestCase):
         self.assertFalse(app.radio)
         self.assertEqual(app.text_input(key="login-username").value, "")
 
+    def test_overview_exposes_clear_operational_sections(self):
+        app = self._login(self._new_app())
+        headings = [item.value for item in app.subheader]
+        for expected in (
+            "County transmission pattern",
+            "County risk watchlist",
+            "Clinical severity and priority groups",
+            "Climate and prevention context",
+            "Commodity readiness",
+        ):
+            self.assertIn(expected, headings)
+        self.assertGreaterEqual(len(app.get("dataframe")), 4)
+        self.assertGreaterEqual(len(app.get("vega_lite_chart")), 4)
+
     def test_clinical_save_persists_and_confirms_after_rerun(self):
         app = self._app_on_page("Clinical data")
         self.assertEqual([tab.label for tab in app.tabs], ["Manual entry", "File upload"])
@@ -93,6 +107,20 @@ class StreamlitDataEntryTests(unittest.TestCase):
         saved = json.loads(self.operational_path.read_text(encoding="utf-8"))
         zone = next(item for item in saved["zones"] if item["id"] == "nyakach-north")
         self.assertEqual(zone["environment"]["rainfall7dMm"], 91.5)
+        self.assertTrue(any("saved successfully" in message.value for message in app.success))
+
+    def test_intervention_page_supports_manual_and_file_entry(self):
+        app = self._app_on_page("Intervention data")
+        self.assertEqual([tab.label for tab in app.tabs], ["Manual entry", "File upload"])
+        self.assertEqual(app.get("file_uploader")[0].key, "intervention-inline-uploader")
+
+        app.number_input[0].set_value(79.0)
+        app.button(key="FormSubmitter:intervention-form-nyakach-north-Save intervention data").click().run(timeout=45)
+
+        self.assertFalse(app.exception)
+        saved = json.loads(self.operational_path.read_text(encoding="utf-8"))
+        zone = next(item for item in saved["zones"] if item["id"] == "nyakach-north")
+        self.assertEqual(zone["interventions"]["llinUsePct"], 79.0)
         self.assertTrue(any("saved successfully" in message.value for message in app.success))
 
     def test_ai_review_exposes_a_subcounty_pdf_download(self):

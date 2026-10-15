@@ -17,7 +17,9 @@
       "weeklyCases": [18, 21, 24, 29, 47, 68],
       "tests": 184,
       "positiveTests": 68,
-      "environment": { "rainfall7dMm": 137, "temperatureC": 27.4, "humidityPct": 81 },
+      "clinical": { "suspectedCases": 204, "severeCases": 7, "admissions": 6, "deaths": 1, "under5ConfirmedCases": 24, "pregnancyConfirmedCases": 6, "chwFeverReferrals": 32, "reportingCompletenessPct": 92 },
+      "environment": { "rainfall7dMm": 137, "rainfall30dMm": 312, "temperatureC": 27.4, "humidityPct": 81, "standingWaterIndex": 86, "floodedSites": 14 },
+      "interventions": { "coverageDate": "2026-09-30", "llinUsePct": 71, "iptp3CoveragePct": 59, "vaccineDose4CoveragePct": 76, "larvalSitesManagedPct": 48 },
       "clinicIds": ["nyakach-ch", "pap-onditi-hc"]
     },
     {
@@ -29,7 +31,9 @@
       "weeklyCases": [31, 28, 34, 37, 45, 53],
       "tests": 191,
       "positiveTests": 53,
-      "environment": { "rainfall7dMm": 118, "temperatureC": 28.1, "humidityPct": 77 },
+      "clinical": { "suspectedCases": 212, "severeCases": 4, "admissions": 4, "deaths": 0, "under5ConfirmedCases": 18, "pregnancyConfirmedCases": 4, "chwFeverReferrals": 27, "reportingCompletenessPct": 90 },
+      "environment": { "rainfall7dMm": 118, "rainfall30dMm": 278, "temperatureC": 28.1, "humidityPct": 77, "standingWaterIndex": 79, "floodedSites": 10 },
+      "interventions": { "coverageDate": "2026-09-30", "llinUsePct": 74, "iptp3CoveragePct": 62, "vaccineDose4CoveragePct": 79, "larvalSitesManagedPct": 52 },
       "clinicIds": ["awasi-sdh", "ahero-cch"]
     },
     {
@@ -41,7 +45,9 @@
       "weeklyCases": [22, 25, 23, 28, 31, 36],
       "tests": 169,
       "positiveTests": 36,
-      "environment": { "rainfall7dMm": 83, "temperatureC": 27.1, "humidityPct": 72 },
+      "clinical": { "suspectedCases": 178, "severeCases": 2, "admissions": 2, "deaths": 0, "under5ConfirmedCases": 12, "pregnancyConfirmedCases": 3, "chwFeverReferrals": 18, "reportingCompletenessPct": 95 },
+      "environment": { "rainfall7dMm": 83, "rainfall30dMm": 205, "temperatureC": 27.1, "humidityPct": 72, "standingWaterIndex": 65, "floodedSites": 6 },
+      "interventions": { "coverageDate": "2026-09-30", "llinUsePct": 78, "iptp3CoveragePct": 65, "vaccineDose4CoveragePct": 82, "larvalSitesManagedPct": 61 },
       "clinicIds": ["muhoroni-sch"]
     },
     {
@@ -53,7 +59,9 @@
       "weeklyCases": [26, 29, 27, 25, 24, 27],
       "tests": 156,
       "positiveTests": 27,
-      "environment": { "rainfall7dMm": 69, "temperatureC": 26.5, "humidityPct": 69 },
+      "clinical": { "suspectedCases": 162, "severeCases": 1, "admissions": 1, "deaths": 0, "under5ConfirmedCases": 9, "pregnancyConfirmedCases": 2, "chwFeverReferrals": 12, "reportingCompletenessPct": 97 },
+      "environment": { "rainfall7dMm": 69, "rainfall30dMm": 176, "temperatureC": 26.5, "humidityPct": 69, "standingWaterIndex": 52, "floodedSites": 3 },
+      "interventions": { "coverageDate": "2026-09-30", "llinUsePct": 81, "iptp3CoveragePct": 67, "vaccineDose4CoveragePct": 85, "larvalSitesManagedPct": 64 },
       "clinicIds": ["kombewa-ch"]
     },
     {
@@ -65,7 +73,9 @@
       "weeklyCases": [19, 17, 20, 18, 21, 20],
       "tests": 148,
       "positiveTests": 20,
-      "environment": { "rainfall7dMm": 54, "temperatureC": 26.8, "humidityPct": 65 },
+      "clinical": { "suspectedCases": 154, "severeCases": 1, "admissions": 1, "deaths": 0, "under5ConfirmedCases": 6, "pregnancyConfirmedCases": 1, "chwFeverReferrals": 10, "reportingCompletenessPct": 96 },
+      "environment": { "rainfall7dMm": 54, "rainfall30dMm": 154, "temperatureC": 26.8, "humidityPct": 65, "standingWaterIndex": 44, "floodedSites": 2 },
+      "interventions": { "coverageDate": "2026-09-30", "llinUsePct": 83, "iptp3CoveragePct": 69, "vaccineDose4CoveragePct": 87, "larvalSitesManagedPct": 68 },
       "clinicIds": ["chulaimbo-sch"]
     },
     {
@@ -77,7 +87,9 @@
       "weeklyCases": [41, 39, 43, 40, 38, 42],
       "tests": 291,
       "positiveTests": 42,
-      "environment": { "rainfall7dMm": 48, "temperatureC": 27.7, "humidityPct": 64 },
+      "clinical": { "suspectedCases": 315, "severeCases": 3, "admissions": 3, "deaths": 0, "under5ConfirmedCases": 13, "pregnancyConfirmedCases": 4, "chwFeverReferrals": 17, "reportingCompletenessPct": 94 },
+      "environment": { "rainfall7dMm": 48, "rainfall30dMm": 149, "temperatureC": 27.7, "humidityPct": 64, "standingWaterIndex": 41, "floodedSites": 1 },
+      "interventions": { "coverageDate": "2026-09-30", "llinUsePct": 79, "iptp3CoveragePct": 64, "vaccineDose4CoveragePct": 81, "larvalSitesManagedPct": 58 },
       "clinicIds": ["jootrh", "railways-dispensary"]
     }
   ],

@@ -56,6 +56,11 @@ class CoreTests(unittest.TestCase):
         self.assertGreaterEqual(assessment["score"], 60)
         self.assertEqual(snapshot["summary"]["zonesMonitored"], len(dataset["zones"]))
         self.assertEqual(snapshot["assessments"][0]["score"], max(item["score"] for item in snapshot["assessments"]))
+        self.assertGreater(snapshot["summary"]["currentCases"], 0)
+        self.assertGreater(snapshot["summary"]["positivityPct"], 0)
+        self.assertIn("clinicalContext", assessment)
+        self.assertIn("rainfall30dMm", assessment["environmentContext"])
+        self.assertIn("llinUsePct", assessment["interventionContext"])
 
     def test_response_cycle_has_human_gate(self):
         cycle = run_response_cycle(load_seed_data(), zone_id="nyakach-north", now="2026-10-14T08:00:00.000Z")
@@ -63,6 +68,11 @@ class CoreTests(unittest.TestCase):
         self.assertEqual([item["agent"] for item in cycle["audit"][:3]], ["Surveillance", "Supply", "Community"])
         plan = plan_resources(load_seed_data(), "nyakach-north", cycle["assessments"][0])
         self.assertTrue(plan["requiresApproval"])
+        self.assertIn("three weeks", plan["method"])
+        self.assertTrue(all("receiverWeeksAfter" in move for move in plan["recommendations"]))
+        advisory = cycle["interventions"][0]["advisories"]["messages"][0]
+        self.assertIn("purpose", advisory)
+        self.assertEqual(len(advisory["reviewChecklist"]), 3)
 
     def test_clinical_csv_is_validated_and_applied_atomically(self):
         dataset = load_seed_data()
@@ -108,6 +118,40 @@ class CoreTests(unittest.TestCase):
         preview = parse_data_import("environment", "environment.json", content, load_seed_data())
         self.assertTrue(preview["canApply"])
         self.assertEqual(preview["normalizedRows"][0]["temperatureC"], 27.2)
+
+    def test_intervention_csv_updates_zone_coverage_context(self):
+        dataset = load_seed_data()
+        content = (
+            "zone_id,coverage_date,llin_use_pct,iptp3_coverage_pct,vaccine_dose4_coverage_pct,larval_sites_managed_pct\n"
+            "nyakach-north,2026-10-01,78,66,82,57\n"
+        ).encode()
+        preview = parse_data_import("intervention", "interventions.csv", content, dataset)
+        self.assertTrue(preview["canApply"])
+        updated = apply_parsed_import(dataset, preview)
+        zone = next(item for item in updated["zones"] if item["id"] == "nyakach-north")
+        self.assertEqual(zone["interventions"]["llinUsePct"], 78)
+        self.assertEqual(zone["interventions"]["coverageDate"], "2026-10-01")
+
+    def test_extended_clinical_and_environment_columns_are_imported(self):
+        dataset = load_seed_data()
+        clinical = (
+            "zone_id,reporting_week,week_1_cases,week_2_cases,week_3_cases,week_4_cases,week_5_cases,week_6_cases,tests,positive_tests,"
+            "suspected_cases,severe_cases,admissions,deaths,under_5_confirmed_cases,pregnancy_confirmed_cases,chw_fever_referrals,reporting_completeness_pct\n"
+            "nyakach-north,2026-W42,20,22,25,31,49,72,200,72,218,8,7,1,26,7,35,96\n"
+        ).encode()
+        preview = parse_data_import("clinical", "clinical.csv", clinical, dataset)
+        self.assertTrue(preview["canApply"])
+        updated = apply_parsed_import(dataset, preview)
+        self.assertEqual(updated["zones"][0]["clinical"]["severeCases"], 8)
+
+        environment = (
+            "zone_id,rainfall_7d_mm,temperature_c,humidity_pct,rainfall_30d_mm,standing_water_index,flooded_sites\n"
+            "nyakach-north,142,27.6,82,331,89,16\n"
+        ).encode()
+        preview = parse_data_import("environment", "environment.csv", environment, updated)
+        self.assertTrue(preview["canApply"])
+        updated = apply_parsed_import(updated, preview)
+        self.assertEqual(updated["zones"][0]["environment"]["standingWaterIndex"], 89)
 
     def test_first_html_table_is_supported(self):
         content = b"""
@@ -184,6 +228,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(captured["payload"]["generationConfig"]["responseMimeType"], "application/json")
         self.assertEqual(captured["payload"]["generationConfig"]["responseJsonSchema"]["type"], "object")
         self.assertIn('"currentCases":99', captured["payload"]["contents"][0]["parts"][0]["text"])
+        self.assertIn('"severeCases":7', captured["payload"]["contents"][0]["parts"][0]["text"])
+        self.assertIn('"llinUsePct":71', captured["payload"]["contents"][0]["parts"][0]["text"])
         self.assertIn("senior public-health operations analyst", captured["payload"]["systemInstruction"]["parts"][0]["text"])
         self.assertEqual(result["review"]["headline"], SAMPLE_REVIEW["headline"])
         self.assertEqual(result["responseId"], "resp_test")

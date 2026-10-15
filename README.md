@@ -81,6 +81,15 @@ DEMO_PASSWORD=use_a_new_strong_password
 
 The dashboard and existing Node/Eve implementation read and write the same ignored `data/operational.json` file, so data entered through either interface remains available to the others. Uploaded CSV, TSV, TXT, JSON, XLSX, and HTML/HTM files are limited to 1,000 aggregate rows and 2 MB. TXT files may use comma, tab, semicolon, or pipe delimiters. Excel imports use the first sheet and HTML imports use the first table. One invalid row blocks the entire import.
 
+The Streamlit dashboard includes four aggregate data domains:
+
+- Clinical surveillance: six-week cases, suspected cases, testing and positivity, severe cases, admissions, deaths, cases among children under five and pregnancy, CHW fever referrals, and reporting completeness.
+- Environmental observations: 7-day and 30-day rainfall, temperature, humidity, standing-water index, and flooded or waterlogged sites.
+- Intervention coverage: LLIN use, IPTp3 coverage, malaria-vaccine fourth-dose coverage, and larval-site management coverage with a source date.
+- Supply readiness: RDT, ACT, and treated-net stock, weekly use, and weeks of coverage.
+
+These additions reflect the [Kenya Malaria Strategy 2023–2027](https://extranet.who.int/cpcd/sites/default/files/public_file_repository/KEN_Kenya_National-Malaria-Strategy_2023-2027.pdf) and [WHO malaria surveillance indicator framework](https://www.who.int/publications/m/item/core-indicators-for-malaria-surveillance-monitoring-and-evaluation). They are presented as operational context; the uncalibrated risk score still uses only case acceleration, positivity, 7-day rainfall, humidity, and temperature. The bundled values are demonstration fixtures, not current surveillance observations.
+
 The Gemini key stays on the Streamlit server. Create one in [Google AI Studio](https://aistudio.google.com/apikey). As an alternative to `.env.local`, create an ignored `.streamlit/secrets.toml`:
 
 ```toml
@@ -89,6 +98,10 @@ GEMINI_MODEL = "gemini-3.8-flash"
 DEMO_USERNAME = "your_demo_username"
 DEMO_PASSWORD = "use_a_new_strong_password"
 ```
+
+For a Streamlit Community Cloud deployment, do not commit either `.env.local` or `.streamlit/secrets.toml`. Open the deployed app, select **Manage app → Settings → Secrets**, paste the TOML block above with a newly issued key, save it, and reboot the app. Community Cloud injects those values into `st.secrets` on the server and keeps them available across source-code redeployments.
+
+If a real key is ever committed, revoke it in Google AI Studio and create a replacement. Removing the value in a later commit does not remove it from Git history.
 
 This lightweight session gate is suitable for a prototype, not production identity management. Replace it with managed authentication, server-side sessions, role-based access, and audit logging before deployment.
 

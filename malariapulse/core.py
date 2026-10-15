@@ -38,10 +38,32 @@ IMPORT_SCHEMAS = {
             "tests",
             "positive_tests",
         ],
+        "optional": [
+            "suspected_cases",
+            "severe_cases",
+            "admissions",
+            "deaths",
+            "under_5_confirmed_cases",
+            "pregnancy_confirmed_cases",
+            "chw_fever_referrals",
+            "reporting_completeness_pct",
+        ],
     },
     "environment": {
         "id_field": "zone_id",
         "required": ["zone_id", "rainfall_7d_mm", "temperature_c", "humidity_pct"],
+        "optional": ["rainfall_30d_mm", "standing_water_index", "flooded_sites"],
+    },
+    "intervention": {
+        "id_field": "zone_id",
+        "required": [
+            "zone_id",
+            "coverage_date",
+            "llin_use_pct",
+            "iptp3_coverage_pct",
+            "vaccine_dose4_coverage_pct",
+            "larval_sites_managed_pct",
+        ],
     },
     "supply": {
         "id_field": "clinic_id",
@@ -77,6 +99,13 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _is_iso_date(value: str) -> bool:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").strftime("%Y-%m-%d") == value
+    except ValueError:
+        return False
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
@@ -90,11 +119,46 @@ def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
 
 
 def load_seed_data() -> dict[str, Any]:
-    return _read_json(SEED_PATH)
+    return _with_operational_defaults(_read_json(SEED_PATH))
 
 
 def load_dataset() -> dict[str, Any]:
-    return _read_json(OPERATIONAL_PATH if OPERATIONAL_PATH.exists() else SEED_PATH)
+    return _with_operational_defaults(_read_json(OPERATIONAL_PATH if OPERATIONAL_PATH.exists() else SEED_PATH))
+
+
+def _with_operational_defaults(dataset: dict[str, Any]) -> dict[str, Any]:
+    """Keep older saved datasets compatible as the operational indicator set grows."""
+
+    metadata_completeness = float(dataset.get("metadata", {}).get("dataCompleteness", 0.9)) * 100
+    for zone in dataset.get("zones", []):
+        tests = int(zone.get("tests", 0))
+        clinical = zone.setdefault("clinical", {})
+        clinical.setdefault("suspectedCases", tests)
+        clinical.setdefault("severeCases", 0)
+        clinical.setdefault("admissions", 0)
+        clinical.setdefault("deaths", 0)
+        clinical.setdefault("under5ConfirmedCases", 0)
+        clinical.setdefault("pregnancyConfirmedCases", 0)
+        clinical.setdefault("chwFeverReferrals", 0)
+        clinical.setdefault("reportingCompletenessPct", round(metadata_completeness, 1))
+
+        environment = zone.setdefault("environment", {})
+        rainfall_7d = float(environment.get("rainfall7dMm", 0))
+        environment.setdefault("rainfall30dMm", round(rainfall_7d * 3.2, 1))
+        environment.setdefault("standingWaterIndex", 0)
+        environment.setdefault("floodedSites", 0)
+
+        zone.setdefault(
+            "interventions",
+            {
+                "coverageDate": dataset.get("metadata", {}).get("updatedAt", "")[:10],
+                "llinUsePct": 0,
+                "iptp3CoveragePct": 0,
+                "vaccineDose4CoveragePct": 0,
+                "larvalSitesManagedPct": 0,
+            },
+        )
+    return dataset
 
 
 def save_dataset(dataset: dict[str, Any]) -> None:
@@ -136,6 +200,13 @@ def assess_zone(zone: dict[str, Any], metadata: dict[str, Any] | None = None) ->
     growth_ratio = recent / max(baseline, 1)
     positivity = zone["positiveTests"] / max(zone["tests"], 1)
     environment = zone["environment"]
+    clinical = zone.get("clinical", {})
+    interventions = zone.get("interventions", {})
+    suspected_cases = max(int(clinical.get("suspectedCases", zone["tests"])), 0)
+    reporting_completeness_pct = float(
+        clinical.get("reportingCompletenessPct", (metadata or {}).get("dataCompleteness", 0.9) * 100)
+    )
+    testing_coverage_pct = _round(zone["tests"] / max(suspected_cases, 1) * 100, 1) if suspected_cases else None
     components = [
         {
             "key": "caseTrend",
@@ -171,7 +242,7 @@ def assess_zone(zone: dict[str, Any], metadata: dict[str, Any] | None = None) ->
     score = int(_round(sum(item["value"] * item["weight"] for item in components) * 100))
     risk_level = classify_risk(score)
     projected_multiplier = _clamp(0.6 + growth_ratio * 0.55, 0.75, 1.85)
-    data_completeness = (metadata or {}).get("dataCompleteness", 0.9)
+    data_completeness = _clamp(reporting_completeness_pct / 100)
     confidence = _round(_clamp(0.7 + data_completeness * 0.24 - (0.15 if zone["tests"] < 30 else 0)), 2)
     recommendation = {
         "critical": "Activate rapid response review within 4 hours.",
@@ -188,6 +259,19 @@ def assess_zone(zone: dict[str, Any], metadata: dict[str, Any] | None = None) ->
         key=lambda item: item["contribution"],
         reverse=True,
     )[:3]
+    priority_flags: list[str] = []
+    if int(clinical.get("deaths", 0)) > 0:
+        priority_flags.append("Verify reported malaria death immediately")
+    if int(clinical.get("severeCases", 0)) >= 5:
+        priority_flags.append("Severe-case burden requires referral-readiness review")
+    if testing_coverage_pct is not None and testing_coverage_pct < 90:
+        priority_flags.append("Fewer than 90% of suspected cases were tested")
+    if reporting_completeness_pct < 90:
+        priority_flags.append("Reporting completeness is below 90%")
+    if float(environment.get("standingWaterIndex", 0)) >= 75:
+        priority_flags.append("High standing-water observation")
+    if 0 < float(interventions.get("llinUsePct", 0)) < 80:
+        priority_flags.append("Reported LLIN use is below 80%")
     return {
         "zoneId": zone["id"],
         "zoneName": zone["name"],
@@ -199,9 +283,27 @@ def assess_zone(zone: dict[str, Any], metadata: dict[str, Any] | None = None) ->
         "expectedCasesNextWeek": int(_round(latest * projected_multiplier)),
         "growthPct": _round((growth_ratio - 1) * 100),
         "positivityPct": _round(positivity * 100, 1),
+        "testingCoveragePct": testing_coverage_pct,
         "incidencePerThousand": _round((latest / zone["population"]) * 1000, 2),
         "coordinates": zone["coordinates"],
         "drivers": drivers,
+        "priorityFlags": priority_flags,
+        "clinicalContext": {
+            "suspectedCases": suspected_cases,
+            "severeCases": int(clinical.get("severeCases", 0)),
+            "admissions": int(clinical.get("admissions", 0)),
+            "deaths": int(clinical.get("deaths", 0)),
+            "under5ConfirmedCases": int(clinical.get("under5ConfirmedCases", 0)),
+            "pregnancyConfirmedCases": int(clinical.get("pregnancyConfirmedCases", 0)),
+            "chwFeverReferrals": int(clinical.get("chwFeverReferrals", 0)),
+            "reportingCompletenessPct": _round(reporting_completeness_pct, 1),
+        },
+        "environmentContext": {
+            "rainfall30dMm": environment.get("rainfall30dMm"),
+            "standingWaterIndex": environment.get("standingWaterIndex"),
+            "floodedSites": environment.get("floodedSites"),
+        },
+        "interventionContext": interventions,
         "recommendation": recommendation,
     }
 
@@ -247,6 +349,12 @@ def plan_resources(dataset: dict[str, Any], zone_id: str, assessment: dict[str, 
                 if deficit <= 0:
                     break
                 quantity = min(deficit, donor["surplus"])
+                receiver_stock_before = target["stock"][resource]
+                donor_stock_before = donor["clinic"]["stock"][resource]
+                receiver_use = target["weeklyUse"][resource]
+                donor_use = donor["clinic"]["weeklyUse"][resource]
+                target["stock"][resource] += quantity
+                donor["clinic"]["stock"][resource] -= quantity
                 recommendations.append(
                     {
                         "priority": "urgent" if assessment["riskLevel"] == "critical" else "high",
@@ -259,11 +367,14 @@ def plan_resources(dataset: dict[str, Any], zone_id: str, assessment: dict[str, 
                         "toClinic": target["name"],
                         "distanceKm": _round(donor["distance"], 1),
                         "etaMinutes": max(25, int(_round(donor["distance"] * 2.4 + 18))),
+                        "receiverWeeksBefore": _round(receiver_stock_before / max(receiver_use, 1), 1),
+                        "receiverWeeksAfter": _round(target["stock"][resource] / max(receiver_use, 1), 1),
+                        "donorWeeksAfter": _round((donor_stock_before - quantity) / max(donor_use, 1), 1),
+                        "targetWeeks": _round(3 * multiplier, 1),
                         "rationale": f"Restores approximately three weeks of safety stock at projected {assessment['riskLevel']} demand.",
                     }
                 )
                 deficit -= quantity
-                donor["clinic"]["stock"][resource] -= quantity
             if deficit > 0:
                 restock_requests.append(
                     {
@@ -273,6 +384,12 @@ def plan_resources(dataset: dict[str, Any], zone_id: str, assessment: dict[str, 
                         "clinicId": target["id"],
                         "clinic": target["name"],
                         "priority": "urgent" if assessment["riskLevel"] == "critical" else "high",
+                        "stockOnHand": target["stock"][resource],
+                        "weeklyUse": target["weeklyUse"][resource],
+                        "coverageWeeks": _round(
+                            target["stock"][resource] / max(target["weeklyUse"][resource], 1), 1
+                        ),
+                        "targetStock": target_level,
                     }
                 )
 
@@ -288,12 +405,15 @@ def plan_resources(dataset: dict[str, Any], zone_id: str, assessment: dict[str, 
         "recommendations": recommendations,
         "restockRequests": restock_requests,
         "requiresApproval": bool(recommendations or restock_requests),
+        "method": (
+            "The draft protects three weeks of stock at donor facilities, adjusts the receiving target for the current "
+            f"{assessment['riskLevel']} risk level, and prioritizes shorter estimated routes."
+        ),
         "note": "Draft only. A county pharmacist or authorized logistics officer must verify counts and approve movement.",
     }
 
 
 def draft_advisories(dataset: dict[str, Any], zone_id: str, assessment: dict[str, Any]) -> dict[str, Any]:
-    del assessment
     zone = next((item for item in dataset["zones"] if item["id"] == zone_id), None)
     if not zone:
         raise ValueError(f"Unknown zone: {zone_id}")
@@ -315,12 +435,33 @@ def draft_advisories(dataset: dict[str, Any], zone_id: str, assessment: dict[str
         "without an approved test-and-treat protocol. Report stock gaps and unusual clusters to the sub-county surveillance lead."
     )
 
-    def message(audience: str, language: str, channel: str, text: str) -> dict[str, Any]:
+    reason = (
+        f"Prepared because {zone['name']} has a {assessment['riskLevel']} operational signal "
+        f"({assessment['score']}/100), {assessment['growthPct']}% case acceleration, and "
+        f"{assessment['positivityPct']}% test positivity."
+    )
+
+    def message(
+        audience: str,
+        language: str,
+        channel: str,
+        text: str,
+        purpose: str,
+        delivery_notes: str,
+    ) -> dict[str, Any]:
         return {
             "audience": audience,
             "language": language,
             "channel": channel,
             "text": text,
+            "purpose": purpose,
+            "reason": reason,
+            "deliveryNotes": delivery_notes,
+            "reviewChecklist": [
+                "Confirm the named facility is open and able to test suspected malaria cases.",
+                "Confirm the message is limited to the intended micro-zone and approved sender list.",
+                "Have an authorized county reviewer approve wording, timing, and release channel.",
+            ],
             "characters": len(text),
             "segments": math.ceil(len(text) / 153),
         }
@@ -328,11 +469,33 @@ def draft_advisories(dataset: dict[str, Any], zone_id: str, assessment: dict[str
     return {
         "zoneId": zone_id,
         "messages": [
-            message("residents", "English", "SMS/WhatsApp", english),
-            message("residents", "Kiswahili", "SMS/WhatsApp", swahili),
-            message("community health workers", "English", "WhatsApp", chw),
+            message(
+                "residents",
+                "English",
+                "SMS/WhatsApp",
+                english,
+                "Encourage nightly LLIN use and prompt testing without declaring an outbreak or diagnosis.",
+                "Use the county-approved sender ID after facility capacity and referral details are verified.",
+            ),
+            message(
+                "residents",
+                "Kiswahili",
+                "SMS/WhatsApp",
+                swahili,
+                "Provide the same prevention and prompt-testing guidance in Kiswahili.",
+                "Have a fluent local reviewer confirm wording before release and pair it with verified facility details.",
+            ),
+            message(
+                "community health workers",
+                "English",
+                "WhatsApp",
+                chw,
+                "Give CHWs a verification, referral, prevention, and stock-escalation checklist.",
+                "Release through the authorized CHW coordination group with the current sub-county escalation contact.",
+            ),
         ],
         "requiresApproval": True,
+        "summary": reason,
         "clinicalSafety": "Templates follow prevention and prompt-testing principles; local health authorities must review before release.",
     }
 
@@ -354,6 +517,19 @@ def build_network_snapshot(dataset: dict[str, Any] | None = None) -> dict[str, A
         )
         for clinic in dataset["clinics"]
     ]
+    latest_cases = sum(item["currentCases"] for item in assessments)
+    previous_cases = sum(zone["weeklyCases"][-2] for zone in dataset["zones"])
+    tests = sum(zone["tests"] for zone in dataset["zones"])
+    positives = sum(zone["positiveTests"] for zone in dataset["zones"])
+    clinical_context = [item["clinicalContext"] for item in assessments]
+    facilities_below_three_weeks = sum(
+        any(
+            clinic["weeklyUse"][resource] > 0
+            and clinic["stock"][resource] / clinic["weeklyUse"][resource] < 3
+            for resource in ("rdt", "act", "nets")
+        )
+        for clinic in dataset["clinics"]
+    )
     return {
         "metadata": dataset["metadata"],
         "assessments": assessments,
@@ -363,6 +539,19 @@ def build_network_snapshot(dataset: dict[str, Any] | None = None) -> dict[str, A
             "highRiskZones": sum(item["riskLevel"] in {"high", "critical"} for item in assessments),
             "facilitiesReporting": len(dataset["clinics"]),
             "supplyReadinessPct": int(_round(_average(readiness) * 100)),
+            "currentCases": latest_cases,
+            "previousCases": previous_cases,
+            "caseChangePct": _round((latest_cases - previous_cases) / max(previous_cases, 1) * 100, 1),
+            "tests": tests,
+            "positiveTests": positives,
+            "positivityPct": _round(positives / max(tests, 1) * 100, 1),
+            "severeCases": sum(item["severeCases"] for item in clinical_context),
+            "admissions": sum(item["admissions"] for item in clinical_context),
+            "deaths": sum(item["deaths"] for item in clinical_context),
+            "reportingCompletenessPct": _round(
+                _average([item["reportingCompletenessPct"] for item in clinical_context]), 1
+            ),
+            "facilitiesBelowThreeWeeks": facilities_below_three_weeks,
             "stock": stock,
         },
     }
@@ -483,7 +672,12 @@ def _stamp(dataset: dict[str, Any], source: str) -> dict[str, Any]:
 
 
 def update_clinical(
-    zone_id: str, weekly_cases: list[Any], tests: Any, positive_tests: Any, reporting_week: str
+    zone_id: str,
+    weekly_cases: list[Any],
+    tests: Any,
+    positive_tests: Any,
+    reporting_week: str,
+    clinical_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     dataset = load_dataset()
     zone = next((item for item in dataset["zones"] if item["id"] == zone_id), None)
@@ -501,22 +695,109 @@ def update_clinical(
     zone["weeklyCases"] = normalized_cases
     zone["tests"] = normalized_tests
     zone["positiveTests"] = normalized_positive
+    if clinical_context is not None:
+        normalized_context = {
+            "suspectedCases": _finite_number(
+                clinical_context.get("suspectedCases"), "Suspected cases", integer=True
+            ),
+            "severeCases": _finite_number(clinical_context.get("severeCases"), "Severe cases", integer=True),
+            "admissions": _finite_number(clinical_context.get("admissions"), "Admissions", integer=True),
+            "deaths": _finite_number(clinical_context.get("deaths"), "Deaths", integer=True),
+            "under5ConfirmedCases": _finite_number(
+                clinical_context.get("under5ConfirmedCases"), "Under-five confirmed cases", integer=True
+            ),
+            "pregnancyConfirmedCases": _finite_number(
+                clinical_context.get("pregnancyConfirmedCases"), "Pregnancy confirmed cases", integer=True
+            ),
+            "chwFeverReferrals": _finite_number(
+                clinical_context.get("chwFeverReferrals"), "CHW fever referrals", integer=True
+            ),
+            "reportingCompletenessPct": _finite_number(
+                clinical_context.get("reportingCompletenessPct"),
+                "Reporting completeness",
+                maximum=100,
+            ),
+        }
+        if normalized_tests > normalized_context["suspectedCases"]:
+            raise ValueError("Tests performed cannot exceed suspected malaria cases.")
+        if normalized_context["severeCases"] > normalized_positive:
+            raise ValueError("Severe cases cannot exceed confirmed positive cases.")
+        if normalized_context["admissions"] > normalized_context["severeCases"]:
+            raise ValueError("Admissions cannot exceed severe cases.")
+        if normalized_context["deaths"] > normalized_context["admissions"]:
+            raise ValueError("Deaths cannot exceed malaria admissions.")
+        if normalized_context["under5ConfirmedCases"] + normalized_context["pregnancyConfirmedCases"] > normalized_positive:
+            raise ValueError("Priority-group confirmed cases cannot exceed all confirmed positive cases.")
+        zone["clinical"] = normalized_context
     dataset["metadata"]["reportingWeek"] = reporting_week
     save_dataset(_stamp(dataset, "clinical-entry"))
     return zone
 
 
-def update_environment(zone_id: str, rainfall: Any, temperature: Any, humidity: Any) -> dict[str, Any]:
+def update_environment(
+    zone_id: str,
+    rainfall: Any,
+    temperature: Any,
+    humidity: Any,
+    rainfall_30d: Any | None = None,
+    standing_water_index: Any | None = None,
+    flooded_sites: Any | None = None,
+) -> dict[str, Any]:
     dataset = load_dataset()
     zone = next((item for item in dataset["zones"] if item["id"] == zone_id), None)
     if not zone:
         raise ValueError(f"Unknown zone: {zone_id}")
+    existing = zone.get("environment", {})
     zone["environment"] = {
         "rainfall7dMm": _finite_number(rainfall, "7-day rainfall", maximum=2_000),
+        "rainfall30dMm": _finite_number(
+            rainfall_30d if rainfall_30d is not None else existing.get("rainfall30dMm", 0),
+            "30-day rainfall",
+            maximum=4_000,
+        ),
         "temperatureC": _finite_number(temperature, "Temperature", minimum=-10, maximum=60),
         "humidityPct": _finite_number(humidity, "Humidity", maximum=100),
+        "standingWaterIndex": _finite_number(
+            standing_water_index if standing_water_index is not None else existing.get("standingWaterIndex", 0),
+            "Standing-water index",
+            maximum=100,
+        ),
+        "floodedSites": _finite_number(
+            flooded_sites if flooded_sites is not None else existing.get("floodedSites", 0),
+            "Flooded sites",
+            integer=True,
+        ),
     }
     save_dataset(_stamp(dataset, "environment-entry"))
+    return zone
+
+
+def update_interventions(
+    zone_id: str,
+    coverage_date: str,
+    llin_use_pct: Any,
+    iptp3_coverage_pct: Any,
+    vaccine_dose4_coverage_pct: Any,
+    larval_sites_managed_pct: Any,
+) -> dict[str, Any]:
+    dataset = load_dataset()
+    zone = next((item for item in dataset["zones"] if item["id"] == zone_id), None)
+    if not zone:
+        raise ValueError(f"Unknown zone: {zone_id}")
+    if not _is_iso_date(coverage_date):
+        raise ValueError("Coverage date must use YYYY-MM-DD.")
+    zone["interventions"] = {
+        "coverageDate": coverage_date,
+        "llinUsePct": _finite_number(llin_use_pct, "LLIN use", maximum=100),
+        "iptp3CoveragePct": _finite_number(iptp3_coverage_pct, "IPTp3 coverage", maximum=100),
+        "vaccineDose4CoveragePct": _finite_number(
+            vaccine_dose4_coverage_pct, "Malaria vaccine dose 4 coverage", maximum=100
+        ),
+        "larvalSitesManagedPct": _finite_number(
+            larval_sites_managed_pct, "Larval sites managed", maximum=100
+        ),
+    }
+    save_dataset(_stamp(dataset, "intervention-entry"))
     return zone
 
 
@@ -550,6 +831,21 @@ def _number_field(
     except ValueError as error:
         errors.append(str(error))
         return None
+
+
+def _optional_number_field(
+    row: dict[str, Any],
+    key: str,
+    errors: list[str],
+    default: int | float,
+    *,
+    minimum: float = 0,
+    maximum: float = 9_007_199_254_740_991,
+    integer: bool = False,
+) -> int | float | None:
+    if key not in row or row.get(key) in ("", None):
+        return default
+    return _number_field(row, key, errors, minimum=minimum, maximum=maximum, integer=integer)
 
 
 class _FirstHTMLTableParser(HTMLParser):
@@ -703,8 +999,10 @@ def _validate_row(kind: str, record: dict[str, Any], dataset: dict[str, Any]) ->
     errors: list[str] = []
     if kind == "clinical":
         zone_id = str(row.get("zone_id", "")).strip()
-        if not any(zone["id"] == zone_id for zone in dataset["zones"]):
-            errors.append(f"Unknown zone_id: {zone_id or '(blank)' }.")
+        zone = next((item for item in dataset["zones"] if item["id"] == zone_id), None)
+        if not zone:
+            errors.append(f"Unknown zone_id: {zone_id or '(blank)'}.")
+        current = (zone or {}).get("clinical", {})
         reporting_week = str(row.get("reporting_week", "")).strip()
         if not re.fullmatch(r"\d{4}-W(0[1-9]|[1-4]\d|5[0-3])", reporting_week):
             errors.append("reporting_week must use YYYY-Www, for example 2026-W41.")
@@ -713,23 +1011,122 @@ def _validate_row(kind: str, record: dict[str, Any], dataset: dict[str, Any]) ->
         positive_tests = _number_field(row, "positive_tests", errors, integer=True)
         if tests is not None and positive_tests is not None and positive_tests > tests:
             errors.append("positive_tests cannot exceed tests.")
+        clinical_context = {
+            "suspectedCases": _optional_number_field(
+                row,
+                "suspected_cases",
+                errors,
+                max(current.get("suspectedCases", 0), tests or 0),
+                integer=True,
+            ),
+            "severeCases": _optional_number_field(
+                row, "severe_cases", errors, current.get("severeCases", 0), integer=True
+            ),
+            "admissions": _optional_number_field(
+                row, "admissions", errors, current.get("admissions", 0), integer=True
+            ),
+            "deaths": _optional_number_field(row, "deaths", errors, current.get("deaths", 0), integer=True),
+            "under5ConfirmedCases": _optional_number_field(
+                row, "under_5_confirmed_cases", errors, current.get("under5ConfirmedCases", 0), integer=True
+            ),
+            "pregnancyConfirmedCases": _optional_number_field(
+                row, "pregnancy_confirmed_cases", errors, current.get("pregnancyConfirmedCases", 0), integer=True
+            ),
+            "chwFeverReferrals": _optional_number_field(
+                row, "chw_fever_referrals", errors, current.get("chwFeverReferrals", 0), integer=True
+            ),
+            "reportingCompletenessPct": _optional_number_field(
+                row,
+                "reporting_completeness_pct",
+                errors,
+                current.get("reportingCompletenessPct", 0),
+                maximum=100,
+            ),
+        }
+        suspected = clinical_context["suspectedCases"]
+        severe = clinical_context["severeCases"]
+        admissions = clinical_context["admissions"]
+        deaths = clinical_context["deaths"]
+        under_five = clinical_context["under5ConfirmedCases"]
+        pregnancy = clinical_context["pregnancyConfirmedCases"]
+        if "suspected_cases" in row and tests is not None and suspected is not None and tests > suspected:
+            errors.append("tests cannot exceed suspected_cases.")
+        if "severe_cases" in row and positive_tests is not None and severe is not None and severe > positive_tests:
+            errors.append("severe_cases cannot exceed positive_tests.")
+        if "admissions" in row and "severe_cases" in row and admissions is not None and severe is not None and admissions > severe:
+            errors.append("admissions cannot exceed severe_cases.")
+        if "deaths" in row and "admissions" in row and deaths is not None and admissions is not None and deaths > admissions:
+            errors.append("deaths cannot exceed admissions.")
+        if (
+            "under_5_confirmed_cases" in row
+            and "pregnancy_confirmed_cases" in row
+            and positive_tests is not None
+            and under_five is not None
+            and pregnancy is not None
+            and under_five + pregnancy > positive_tests
+        ):
+            errors.append("priority-group confirmed cases cannot exceed positive_tests.")
         normalized = {
             "zoneId": zone_id,
             "reportingWeek": reporting_week,
             "weeklyCases": weekly_cases,
             "tests": tests,
             "positiveTests": positive_tests,
+            "clinical": clinical_context,
         }
-        preview = f"Week {reporting_week or '—'} · latest cases {weekly_cases[-1] if weekly_cases else '—'} · {positive_tests}/{tests} positive"
+        preview = (
+            f"Week {reporting_week or '—'} · latest {weekly_cases[-1] if weekly_cases else '—'} · "
+            f"{positive_tests}/{tests} positive · severe {severe}"
+        )
     elif kind == "environment":
         zone_id = str(row.get("zone_id", "")).strip()
-        if not any(zone["id"] == zone_id for zone in dataset["zones"]):
+        zone = next((item for item in dataset["zones"] if item["id"] == zone_id), None)
+        if not zone:
             errors.append(f"Unknown zone_id: {zone_id or '(blank)'}.")
+        current = (zone or {}).get("environment", {})
         rainfall = _number_field(row, "rainfall_7d_mm", errors, maximum=2_000)
         temperature = _number_field(row, "temperature_c", errors, minimum=-10, maximum=60)
         humidity = _number_field(row, "humidity_pct", errors, maximum=100)
-        normalized = {"zoneId": zone_id, "rainfall7dMm": rainfall, "temperatureC": temperature, "humidityPct": humidity}
-        preview = f"{rainfall} mm · {temperature} °C · {humidity}% humidity"
+        rainfall_30d = _optional_number_field(
+            row, "rainfall_30d_mm", errors, current.get("rainfall30dMm", 0), maximum=4_000
+        )
+        standing_water = _optional_number_field(
+            row, "standing_water_index", errors, current.get("standingWaterIndex", 0), maximum=100
+        )
+        flooded_sites = _optional_number_field(
+            row, "flooded_sites", errors, current.get("floodedSites", 0), integer=True
+        )
+        normalized = {
+            "zoneId": zone_id,
+            "rainfall7dMm": rainfall,
+            "rainfall30dMm": rainfall_30d,
+            "temperatureC": temperature,
+            "humidityPct": humidity,
+            "standingWaterIndex": standing_water,
+            "floodedSites": flooded_sites,
+        }
+        preview = f"{rainfall} mm / 7d · {rainfall_30d} mm / 30d · standing water {standing_water}/100"
+    elif kind == "intervention":
+        zone_id = str(row.get("zone_id", "")).strip()
+        if not any(zone["id"] == zone_id for zone in dataset["zones"]):
+            errors.append(f"Unknown zone_id: {zone_id or '(blank)'}.")
+        coverage_date = str(row.get("coverage_date", "")).strip()
+        if not _is_iso_date(coverage_date):
+            errors.append("coverage_date must use YYYY-MM-DD.")
+        normalized = {
+            "zoneId": zone_id,
+            "coverageDate": coverage_date,
+            "llinUsePct": _number_field(row, "llin_use_pct", errors, maximum=100),
+            "iptp3CoveragePct": _number_field(row, "iptp3_coverage_pct", errors, maximum=100),
+            "vaccineDose4CoveragePct": _number_field(
+                row, "vaccine_dose4_coverage_pct", errors, maximum=100
+            ),
+            "larvalSitesManagedPct": _number_field(row, "larval_sites_managed_pct", errors, maximum=100),
+        }
+        preview = (
+            f"LLIN {normalized['llinUsePct']}% · IPTp3 {normalized['iptp3CoveragePct']}% · "
+            f"vaccine dose 4 {normalized['vaccineDose4CoveragePct']}%"
+        )
     else:
         clinic_id = str(row.get("clinic_id", "")).strip()
         if not any(clinic["id"] == clinic_id for clinic in dataset["clinics"]):
@@ -745,7 +1142,7 @@ def _validate_row(kind: str, record: dict[str, Any], dataset: dict[str, Any]) ->
 
 def parse_data_import(kind: str, filename: str, content: bytes, dataset: dict[str, Any] | None = None) -> dict[str, Any]:
     if kind not in IMPORT_SCHEMAS:
-        raise ValueError("Import type must be clinical, environment, or supply.")
+        raise ValueError("Import type must be clinical, environment, intervention, or supply.")
     dataset = dataset or load_dataset()
     file_format, columns, records = _parse_uploaded(filename, content)
     if len(records) > MAX_IMPORT_ROWS:
@@ -792,7 +1189,8 @@ def parse_data_import(kind: str, filename: str, content: bytes, dataset: dict[st
         if len(weeks) > 1:
             file_errors.append("All clinical rows in one import must use the same reporting_week.")
     valid_count = sum(row["valid"] for row in rows)
-    warnings = [column for column in columns if column not in schema["required"] and column not in SENSITIVE_COLUMNS]
+    known_columns = [*schema["required"], *schema.get("optional", [])]
+    warnings = [column for column in columns if column not in known_columns and column not in SENSITIVE_COLUMNS]
     return {
         "kind": kind,
         "filename": filename,
@@ -819,14 +1217,28 @@ def apply_parsed_import(dataset: dict[str, Any], result: dict[str, Any]) -> dict
             zone["weeklyCases"] = row["weeklyCases"]
             zone["tests"] = row["tests"]
             zone["positiveTests"] = row["positiveTests"]
+            zone["clinical"] = row["clinical"]
             updated["metadata"]["reportingWeek"] = row["reportingWeek"]
     elif result["kind"] == "environment":
         for row in result["normalizedRows"]:
             zone = next(item for item in updated["zones"] if item["id"] == row["zoneId"])
             zone["environment"] = {
                 "rainfall7dMm": row["rainfall7dMm"],
+                "rainfall30dMm": row["rainfall30dMm"],
                 "temperatureC": row["temperatureC"],
                 "humidityPct": row["humidityPct"],
+                "standingWaterIndex": row["standingWaterIndex"],
+                "floodedSites": row["floodedSites"],
+            }
+    elif result["kind"] == "intervention":
+        for row in result["normalizedRows"]:
+            zone = next(item for item in updated["zones"] if item["id"] == row["zoneId"])
+            zone["interventions"] = {
+                "coverageDate": row["coverageDate"],
+                "llinUsePct": row["llinUsePct"],
+                "iptp3CoveragePct": row["iptp3CoveragePct"],
+                "vaccineDose4CoveragePct": row["vaccineDose4CoveragePct"],
+                "larvalSitesManagedPct": row["larvalSitesManagedPct"],
             }
     else:
         for row in result["normalizedRows"]:
@@ -855,13 +1267,27 @@ def import_template(kind: str, dataset: dict[str, Any] | None = None) -> bytes:
         raise ValueError("Unknown import type.")
     dataset = dataset or load_dataset()
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=IMPORT_SCHEMAS[kind]["required"], lineterminator="\n")
+    fieldnames = [*IMPORT_SCHEMAS[kind]["required"], *IMPORT_SCHEMAS[kind].get("optional", [])]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     if kind == "clinical":
         for zone in dataset["zones"]:
             row = {"zone_id": zone["id"], "reporting_week": dataset["metadata"]["reportingWeek"]}
             row.update({f"week_{index}_cases": value for index, value in enumerate(zone["weeklyCases"], start=1)})
             row.update({"tests": zone["tests"], "positive_tests": zone["positiveTests"]})
+            clinical = zone["clinical"]
+            row.update(
+                {
+                    "suspected_cases": clinical["suspectedCases"],
+                    "severe_cases": clinical["severeCases"],
+                    "admissions": clinical["admissions"],
+                    "deaths": clinical["deaths"],
+                    "under_5_confirmed_cases": clinical["under5ConfirmedCases"],
+                    "pregnancy_confirmed_cases": clinical["pregnancyConfirmedCases"],
+                    "chw_fever_referrals": clinical["chwFeverReferrals"],
+                    "reporting_completeness_pct": clinical["reportingCompletenessPct"],
+                }
+            )
             writer.writerow(row)
     elif kind == "environment":
         for zone in dataset["zones"]:
@@ -869,8 +1295,24 @@ def import_template(kind: str, dataset: dict[str, Any] | None = None) -> bytes:
                 {
                     "zone_id": zone["id"],
                     "rainfall_7d_mm": zone["environment"]["rainfall7dMm"],
+                    "rainfall_30d_mm": zone["environment"]["rainfall30dMm"],
                     "temperature_c": zone["environment"]["temperatureC"],
                     "humidity_pct": zone["environment"]["humidityPct"],
+                    "standing_water_index": zone["environment"]["standingWaterIndex"],
+                    "flooded_sites": zone["environment"]["floodedSites"],
+                }
+            )
+    elif kind == "intervention":
+        for zone in dataset["zones"]:
+            interventions = zone["interventions"]
+            writer.writerow(
+                {
+                    "zone_id": zone["id"],
+                    "coverage_date": interventions["coverageDate"],
+                    "llin_use_pct": interventions["llinUsePct"],
+                    "iptp3_coverage_pct": interventions["iptp3CoveragePct"],
+                    "vaccine_dose4_coverage_pct": interventions["vaccineDose4CoveragePct"],
+                    "larval_sites_managed_pct": interventions["larvalSitesManagedPct"],
                 }
             )
     else:
