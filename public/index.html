@@ -250,7 +250,7 @@
 
           <section class="view" data-view-panel="ai">
             <div class="workspace-intro">
-              <div><p class="eyebrow">Live OpenAI analysis</p><h2>AI operations analyst</h2><p>Generate a high-level management review from the latest saved clinical, environmental, and supply data.</p></div>
+              <div><p class="eyebrow">Live Gemini analysis</p><h2>AI operations analyst</h2><p>Generate a high-level management review from the latest saved clinical, environmental, and supply data.</p></div>
               <span class="ai-connection" id="ai-connection"><i></i>Checking configuration</span>
             </div>
             <div class="ai-layout">
@@ -261,7 +261,7 @@
                   <div class="field field-wide"><span>Suggested reviews</span><div class="ai-presets"><button type="button" data-ai-prompt="Give a high-level county review and identify the most urgent priorities for the next 24 hours.">Executive overview</button><button type="button" data-ai-prompt="Compare all zones, explain the strongest risk signals, and identify which alerts need verification first.">Risk comparison</button><button type="button" data-ai-prompt="Review supply readiness across the network and rank the most important stock actions.">Supply readiness</button><button type="button" data-ai-prompt="Review data freshness, completeness, and any gaps that could change the operational interpretation.">Data quality</button></div></div>
                   <label class="field field-wide"><span>Operational question · optional</span><textarea id="ai-question" rows="4" maxlength="1000" placeholder="What should the county response team prioritize in the next 24 hours?"></textarea></label>
                   <div class="ai-data-source field-wide"><span class="live-dot"></span><div><strong>Uses the latest saved snapshot</strong><span id="ai-data-source">Waiting for operational data</span></div></div>
-                  <div class="key-guidance field-wide" id="key-guidance"><strong>Server-side key required</strong><span>Add <code>OPENAI_API_KEY</code> to <code>.env.local</code>, then restart the server. The key is never returned to this page.</span></div>
+                  <div class="key-guidance field-wide" id="key-guidance"><strong>Server-side key required</strong><span>Add <code>GEMINI_API_KEY</code> to <code>.env.local</code>, then restart the server. The key is never returned to this page.</span></div>
                 </div>
                 <div class="form-actions"><p>The review is regenerated from current data and remains decision support.</p><button class="button button-primary" id="ai-submit" type="submit">✦ Generate high-level review</button></div>
               </form>

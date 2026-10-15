@@ -1,10 +1,10 @@
 import { defineAgent } from "eve";
-import { openai } from "eve/models/openai";
+import { geminiModel } from "../../model.js";
 
 export default defineAgent({
   description:
     "Evaluate facility RDT, ACT, and treated-net telemetry for a flagged zone and draft safety-stock-aware redistribution routes or county restock requests.",
-  model: openai("gpt-6-astra"),
+  model: geminiModel,
   modelContextWindowTokens: 128_000,
   reasoning: "high",
   limits: {

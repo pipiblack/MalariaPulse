@@ -19,7 +19,7 @@ The repository contains three compatible surfaces backed by the same operational
 - A polished session-based demo login and sidebar logout flow, with credentials that can be overridden from server configuration.
 - A primary bulk-upload workspace for CSV, TSV, and JSON clinical, environmental, and supply files, with downloadable templates, full-file validation, and row-level errors.
 - Optional single-record tabs for clinical reports, environmental observations, and facility supply telemetry; saved values immediately feed scoring and agent tools.
-- A live AI operations analyst backed by the OpenAI Responses API, with county-wide and micro-zone reviews, structured findings, ranked priorities, and explicit data-quality notes.
+- A live AI operations analyst backed by the Google Gemini API, with county-wide and micro-zone reviews, structured findings, ranked priorities, and explicit data-quality notes.
 - Eve subagents for surveillance, supply, and community action, plus a root orchestrator and recurring schedule.
 - An always-on human approval gate before stock or outreach authorization.
 - Node tests for scoring, planning, messaging, and orchestration.
@@ -58,7 +58,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 cp .env.example .env.local
-# Add your OPENAI_API_KEY to .env.local
+# Add your GEMINI_API_KEY to .env.local
 python3 -m streamlit run streamlit_app.py
 ```
 
@@ -80,11 +80,11 @@ DEMO_PASSWORD=use_a_new_strong_password
 
 The dashboard and existing Node/Eve implementation read and write the same ignored `data/operational.json` file, so data entered through either interface remains available to the others. Uploaded CSV, TSV, TXT, JSON, XLSX, and HTML/HTM files are limited to 1,000 aggregate rows and 2 MB. TXT files may use comma, tab, semicolon, or pipe delimiters. Excel imports use the first sheet and HTML imports use the first table. One invalid row blocks the entire import.
 
-The OpenAI key stays on the Streamlit server. As an alternative to `.env.local`, create an ignored `.streamlit/secrets.toml`:
+The Gemini key stays on the Streamlit server. Create one in [Google AI Studio](https://aistudio.google.com/apikey). As an alternative to `.env.local`, create an ignored `.streamlit/secrets.toml`:
 
 ```toml
-OPENAI_API_KEY = "your_key_here"
-OPENAI_MODEL = "gpt-6-astra"
+GEMINI_API_KEY = "your_key_here"
+GEMINI_MODEL = "gemini-3.8-flash"
 DEMO_USERNAME = "your_demo_username"
 DEMO_PASSWORD = "use_a_new_strong_password"
 ```
@@ -107,7 +107,7 @@ Node 24+ is the supported project runtime because Eve 0.79 requires it.
 nvm use
 npm install
 cp .env.example .env.local
-# Add your OPENAI_API_KEY to .env.local
+# Add your GEMINI_API_KEY to .env.local
 npm run demo
 ```
 
@@ -128,7 +128,7 @@ npm run check
 
 ## Run the durable agent
 
-Configure one model connection (AI Gateway by default), then start Eve:
+Configure the same Gemini connection used by the dashboards, then start Eve:
 
 ```bash
 cp .env.example .env.local

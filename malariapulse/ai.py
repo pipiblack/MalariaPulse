@@ -1,18 +1,19 @@
-"""OpenAI-backed high-level operational reviews for aggregate MalariaPulse data."""
+"""Gemini-backed high-level operational reviews for aggregate MalariaPulse data."""
 
 from __future__ import annotations
 
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
 from .core import ROOT, assess_zone, build_network_snapshot, draft_advisories, plan_resources, utc_now
 
-OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
-DEFAULT_MODEL = "gpt-6-astra"
+GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+DEFAULT_MODEL = "gemini-3.8-flash"
 
 ANALYST_INSTRUCTIONS = """You are the MalariaPulse senior public-health operations analyst for a county response team.
 
@@ -108,20 +109,27 @@ def get_setting(name: str, default: str | None = None) -> str | None:
 
 
 def has_usable_api_key(api_key: str | None) -> bool:
+    normalized = api_key.lower().replace("-", "_").replace(" ", "_") if isinstance(api_key, str) else ""
     return bool(
         isinstance(api_key, str)
         and len(api_key.strip()) > 20
-        and "your_openai_api_key" not in api_key.lower().replace("-", "_").replace(" ", "_")
+        and "your_gemini_api_key" not in normalized
+        and "your_google_api_key" not in normalized
     )
 
 
+def get_gemini_api_key() -> str | None:
+    """Resolve the Google-recommended key names in their documented precedence order."""
+    return get_setting("GOOGLE_API_KEY") or get_setting("GEMINI_API_KEY")
+
+
 def get_ai_status(api_key: str | None = None, model: str | None = None) -> dict[str, Any]:
-    key = api_key or get_setting("OPENAI_API_KEY")
+    key = api_key or get_gemini_api_key()
     return {
         "configured": has_usable_api_key(key),
-        "provider": "OpenAI",
-        "model": model or get_setting("OPENAI_MODEL", DEFAULT_MODEL),
-        "api": "Responses API",
+        "provider": "Google Gemini",
+        "model": model or get_setting("GEMINI_MODEL", DEFAULT_MODEL),
+        "api": "GenerateContent API",
     }
 
 
@@ -196,17 +204,21 @@ def build_analysis_context(dataset: dict[str, Any], scope_id: str) -> dict[str, 
 
 
 def _extract_output_text(response: dict[str, Any]) -> str:
-    if isinstance(response.get("output_text"), str) and response["output_text"].strip():
-        return response["output_text"].strip()
+    prompt_feedback = response.get("promptFeedback") or {}
+    if prompt_feedback.get("blockReason"):
+        reason = prompt_feedback["blockReason"]
+        message = prompt_feedback.get("blockReasonMessage") or reason
+        raise AIAnalystError(f"Gemini blocked this review request: {message}")
+
     parts: list[str] = []
-    for item in response.get("output", []):
-        if item.get("type") != "message":
-            continue
-        for part in item.get("content", []):
-            if part.get("type") == "refusal":
-                raise AIAnalystError(f"The model could not produce this review: {part.get('refusal', 'request refused')}")
-            if part.get("type") == "output_text" and isinstance(part.get("text"), str):
+    candidates = response.get("candidates") or []
+    if candidates:
+        candidate = candidates[0]
+        for part in (candidate.get("content") or {}).get("parts", []):
+            if not part.get("thought") and isinstance(part.get("text"), str):
                 parts.append(part["text"])
+        if not parts and candidate.get("finishReason"):
+            raise AIAnalystError(f"Gemini returned no review output ({candidate['finishReason']}).")
     return "\n".join(parts).strip()
 
 
@@ -226,11 +238,12 @@ def _validate_review(review: Any) -> dict[str, Any]:
     return review
 
 
-def _call_openai(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
+def _call_gemini(payload: dict[str, Any], api_key: str, model: str) -> dict[str, Any]:
+    endpoint = f"{GEMINI_API_BASE_URL}/{urllib.parse.quote(model, safe='')}:generateContent"
     request = urllib.request.Request(
-        OPENAI_RESPONSES_URL,
+        endpoint,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
         method="POST",
     )
     try:
@@ -242,9 +255,9 @@ def _call_openai(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
             detail = body.get("error", {}).get("message")
         except (json.JSONDecodeError, UnicodeDecodeError):
             detail = None
-        raise AIAnalystError(detail or f"OpenAI request failed with status {error.code}.") from error
+        raise AIAnalystError(detail or f"Gemini request failed with status {error.code}.") from error
     except urllib.error.URLError as error:
-        raise AIAnalystError("The OpenAI service could not be reached. Check the server connection and try again.") from error
+        raise AIAnalystError("The Gemini service could not be reached. Check the server connection and try again.") from error
     except TimeoutError as error:
         raise AIAnalystError("The AI review timed out. Try again in a moment.") from error
 
@@ -258,32 +271,26 @@ def create_ai_review(
     model: str | None = None,
     request_fn: Callable[[dict[str, Any], str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    key = api_key or get_setting("OPENAI_API_KEY")
+    key = api_key or get_gemini_api_key()
     if not has_usable_api_key(key):
-        raise AIAnalystError("OPENAI_API_KEY is not configured. Add it to .env.local or Streamlit secrets, then restart the app.")
-    selected_model = model or get_setting("OPENAI_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL
+        raise AIAnalystError("GEMINI_API_KEY is not configured. Add it to .env.local or Streamlit secrets, then restart the app.")
+    selected_model = model or get_setting("GEMINI_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL
     context = build_analysis_context(dataset, scope_id or "network")
+    prompt = (
+        "Prepare an executive malaria operations review for the supplied scope. Return 3-5 key findings and 3-5 ranked priorities.\n\n"
+        f"Operator question: {question or 'Give a high-level review and identify what the county response team should prioritize next.'}\n\n"
+        f"Aggregate snapshot:\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}"
+    )
     payload = {
-        "model": selected_model,
-        "reasoning": {"effort": "medium"},
-        "instructions": ANALYST_INSTRUCTIONS,
-        "input": (
-            "Prepare an executive malaria operations review for the supplied scope. Return 3-5 key findings and 3-5 ranked priorities.\n\n"
-            f"Operator question: {question or 'Give a high-level review and identify what the county response team should prioritize next.'}\n\n"
-            f"Aggregate snapshot:\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}"
-        ),
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "malaria_operations_review",
-                "strict": True,
-                "schema": REVIEW_SCHEMA,
-            }
+        "systemInstruction": {"parts": [{"text": ANALYST_INSTRUCTIONS}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseJsonSchema": REVIEW_SCHEMA,
+            "maxOutputTokens": 2_000,
         },
-        "max_output_tokens": 2_000,
-        "store": False,
     }
-    response = (request_fn or _call_openai)(payload, key)
+    response = request_fn(payload, key) if request_fn else _call_gemini(payload, key, selected_model)
     output_text = _extract_output_text(response)
     if not output_text:
         raise AIAnalystError("The model returned no review output.")
@@ -294,7 +301,7 @@ def create_ai_review(
     return {
         "review": review,
         "model": selected_model,
-        "responseId": response.get("id"),
+        "responseId": response.get("responseId"),
         "generatedAt": utc_now(),
         "sourceUpdatedAt": dataset["metadata"].get("updatedAt"),
         "sourceMode": dataset["metadata"].get("mode"),

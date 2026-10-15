@@ -32,7 +32,7 @@ loadEnvFile(".env.local");
 
 export const config = {
   port: Number(process.env.PORT || 3000),
-  openAIKey: process.env.OPENAI_API_KEY || "",
-  openAIModel: process.env.OPENAI_MODEL || "gpt-6-astra"
+  geminiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "",
+  geminiModel: process.env.GEMINI_MODEL || "gemini-3.8-flash"
 };
 

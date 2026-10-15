@@ -1,10 +1,10 @@
 import { defineAgent } from "eve";
-import { openai } from "eve/models/openai";
+import { geminiModel } from "../../model.js";
 
 export default defineAgent({
   description:
     "Assess current malaria risk by micro-zone from aggregated clinical and environmental signals, explain drivers, and identify zones crossing action thresholds.",
-  model: openai("gpt-6-astra"),
+  model: geminiModel,
   modelContextWindowTokens: 128_000,
   reasoning: "high",
   limits: {

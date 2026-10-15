@@ -68,35 +68,38 @@ const REVIEW_SCHEMA = {
 };
 
 function hasUsableApiKey(apiKey) {
-  return typeof apiKey === "string" && apiKey.trim().length > 20 && !/your[_ -]?openai[_ -]?api[_ -]?key/i.test(apiKey);
+  return (
+    typeof apiKey === "string" &&
+    apiKey.trim().length > 20 &&
+    !/your[_ -]?(?:gemini|google)[_ -]?api[_ -]?key/i.test(apiKey)
+  );
 }
 
 export function getAIStatus() {
   return {
-    configured: hasUsableApiKey(config.openAIKey),
-    provider: "OpenAI",
-    model: config.openAIModel,
-    api: "Responses API",
+    configured: hasUsableApiKey(config.geminiKey),
+    provider: "Google Gemini",
+    model: config.geminiModel,
+    api: "GenerateContent API",
     capabilities: ["network_review", "zone_review", "structured_output"]
   };
 }
 
 function extractOutputText(response) {
-  if (typeof response.output_text === "string" && response.output_text.trim()) return response.output_text.trim();
-  return (response.output ?? [])
-    .filter((item) => item?.type === "message")
-    .flatMap((item) => item.content ?? [])
-    .filter((part) => part?.type === "output_text" && typeof part.text === "string")
+  if (response?.promptFeedback?.blockReason) {
+    const message = response.promptFeedback.blockReasonMessage || response.promptFeedback.blockReason;
+    throw new Error(`Gemini blocked this review request: ${message}`);
+  }
+  const candidate = response?.candidates?.[0];
+  const output = (candidate?.content?.parts ?? [])
+    .filter((part) => !part?.thought && typeof part?.text === "string")
     .map((part) => part.text)
     .join("\n")
     .trim();
-}
-
-function extractRefusal(response) {
-  return (response.output ?? [])
-    .filter((item) => item?.type === "message")
-    .flatMap((item) => item.content ?? [])
-    .find((part) => part?.type === "refusal")?.refusal;
+  if (!output && candidate?.finishReason) {
+    throw new Error(`Gemini returned no review output (${candidate.finishReason}).`);
+  }
+  return output;
 }
 
 function clinicContext(clinic) {
@@ -197,43 +200,37 @@ export async function createAIIncidentBrief({
   zoneId = "network",
   question = "",
   fetchImpl = fetch,
-  apiKey = config.openAIKey,
-  model = config.openAIModel
+  apiKey = config.geminiKey,
+  model = config.geminiModel
 }) {
   if (!hasUsableApiKey(apiKey)) {
-    const error = new Error("OPENAI_API_KEY is not configured. Add it to .env.local and restart the server.");
+    const error = new Error("GEMINI_API_KEY is not configured. Add it to .env.local and restart the server.");
     error.code = "AI_NOT_CONFIGURED";
     throw error;
   }
 
   const scopeId = zoneId || "network";
   const context = buildAnalysisContext(dataset, scopeId);
+  const prompt = `Prepare an executive malaria operations review for the supplied scope. Return 3-5 key findings and 3-5 ranked priorities.\n\nOperator question: ${question || "Give a high-level review and identify what the county response team should prioritize next."}\n\nAggregate snapshot:\n${JSON.stringify(context)}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45_000);
   let response;
   try {
-    response = await fetchImpl("https://api.openai.com/v1/responses", {
+    response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${apiKey}`,
+        "x-goog-api-key": apiKey,
         "content-type": "application/json"
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model,
-        reasoning: { effort: "medium" },
-        instructions: ANALYST_INSTRUCTIONS,
-        input: `Prepare an executive malaria operations review for the supplied scope. Return 3-5 key findings and 3-5 ranked priorities.\n\nOperator question: ${question || "Give a high-level review and identify what the county response team should prioritize next."}\n\nAggregate snapshot:\n${JSON.stringify(context)}`,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "malaria_operations_review",
-            strict: true,
-            schema: REVIEW_SCHEMA
-          }
-        },
-        max_output_tokens: 2_000,
-        store: false
+        systemInstruction: { parts: [{ text: ANALYST_INSTRUCTIONS }] },
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseJsonSchema: REVIEW_SCHEMA,
+          maxOutputTokens: 2_000
+        }
       })
     });
   } catch (error) {
@@ -245,12 +242,10 @@ export async function createAIIncidentBrief({
 
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(body?.error?.message || `OpenAI request failed with status ${response.status}.`);
+    const error = new Error(body?.error?.message || `Gemini request failed with status ${response.status}.`);
     error.code = "AI_REQUEST_FAILED";
     throw error;
   }
-  const refusal = extractRefusal(body);
-  if (refusal) throw new Error(`The model could not produce this review: ${refusal}`);
   const outputText = extractOutputText(body);
   if (!outputText) throw new Error("The model returned no review output.");
 
@@ -266,7 +261,7 @@ export async function createAIIncidentBrief({
     review,
     text: reviewAsText(review),
     model,
-    responseId: body.id ?? null,
+    responseId: body.responseId ?? null,
     generatedAt: new Date().toISOString(),
     sourceUpdatedAt: dataset.metadata.updatedAt,
     sourceMode: dataset.metadata.mode,

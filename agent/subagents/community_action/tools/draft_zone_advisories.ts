@@ -13,7 +13,7 @@ export default defineTool({
   },
   execute({ zoneId }) {
     const dataset = loadDataset();
-    const zone = dataset.zones.find((item) => item.id === zoneId);
+    const zone = dataset.zones.find((item: { id: string }) => item.id === zoneId);
     if (!zone) throw new Error(`Unknown zone: ${zoneId}`);
     const assessment = assessZone(zone, dataset.metadata);
     return {

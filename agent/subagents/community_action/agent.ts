@@ -1,10 +1,10 @@
 import { defineAgent } from "eve";
-import { openai } from "eve/models/openai";
+import { geminiModel } from "../../model.js";
 
 export default defineAgent({
   description:
     "Draft concise, hyper-local malaria prevention and prompt-testing messages for residents and community health workers in English and Kiswahili.",
-  model: openai("gpt-6-astra"),
+  model: geminiModel,
   modelContextWindowTokens: 128_000,
   reasoning: "high",
   limits: {

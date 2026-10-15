@@ -25,6 +25,7 @@ from malariapulse.core import (
     update_environment,
     update_supply,
 )
+from malariapulse.report import ai_report_filename, build_ai_report_pdf, report_jurisdiction
 
 st.set_page_config(
     page_title="MalariaPulse",
@@ -84,6 +85,28 @@ st.markdown(
     [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) { background: #1d3659; border-left-color: #5d91ff; }
     [data-testid="stSidebar"] [data-testid="stRadio"] label p { color: #9eacc1; font-size: .84rem; font-weight: 650; }
     [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) p { color: #fff; }
+    [data-testid="stSidebar"] .st-key-logout { margin: .55rem 0 .2rem; }
+    [data-testid="stSidebar"] .st-key-logout button {
+      min-height: 2.7rem;
+      background: var(--mp-red) !important;
+      border: 1px solid #ff8b86 !important;
+      border-radius: 10px !important;
+      box-shadow: 0 8px 20px rgba(230,83,76,.24);
+    }
+    [data-testid="stSidebar"] .st-key-logout button:hover {
+      background: #c83f39 !important;
+      border-color: #ffaaa6 !important;
+      transform: translateY(-1px);
+    }
+    [data-testid="stSidebar"] .st-key-logout button:focus-visible {
+      outline: 3px solid rgba(255,255,255,.82) !important;
+      outline-offset: 2px;
+    }
+    [data-testid="stSidebar"] .st-key-logout button p,
+    [data-testid="stSidebar"] .st-key-logout button span {
+      color: #fff !important;
+      font-weight: 800 !important;
+    }
     @media (max-width: 800px) { .mp-title { font-size: 1.55rem; } }
     </style>
     """,
@@ -340,12 +363,28 @@ def _render_cycle(cycle: dict[str, Any] | None) -> None:
             st.rerun()
 
 
-def _render_ai_review(result: dict[str, Any]) -> None:
+def _render_ai_review(result: dict[str, Any], dataset: dict[str, Any]) -> None:
     review = result["review"]
+    jurisdiction = report_jurisdiction(result, dataset)
+    report_pdf = build_ai_report_pdf(result, dataset)
     with st.container(border=True):
-        st.caption("AI OPERATIONS REVIEW")
-        st.subheader(review["headline"])
-        st.markdown(_risk_chip(review["overallRisk"]), unsafe_allow_html=True)
+        summary_col, download_col = st.columns([3.2, 1.15], vertical_alignment="center")
+        with summary_col:
+            st.caption("AI OPERATIONS REVIEW")
+            st.subheader(review["headline"])
+            st.markdown(_risk_chip(review["overallRisk"]), unsafe_allow_html=True)
+        with download_col:
+            st.download_button(
+                "Download AI report",
+                data=report_pdf,
+                file_name=ai_report_filename(result, dataset),
+                mime="application/pdf",
+                type="primary",
+                icon=":material/download:",
+                width="stretch",
+                key="download-ai-report",
+            )
+            st.caption(f"PDF · {jurisdiction} letterhead")
     st.subheader("Executive summary")
     st.write(review["executiveSummary"])
     st.subheader("Key findings")
@@ -383,7 +422,7 @@ def _render_ai_review(result: dict[str, Any]) -> None:
             st.write(f"• {limitation}")
     st.caption(
         f"Generated {_format_time(result['generatedAt'])} with {result['model']} · "
-        f"source updated {_format_time(result.get('sourceUpdatedAt'))} · OpenAI response {result.get('responseId') or 'not supplied'}"
+        f"source updated {_format_time(result.get('sourceUpdatedAt'))} · Gemini response {result.get('responseId') or 'not supplied'}"
     )
 
 
@@ -396,8 +435,8 @@ dataset = load_dataset()
 snapshot = build_network_snapshot(dataset)
 zone_names = _zone_names(dataset)
 clinic_names = _clinic_names(dataset)
-api_key = _secret("OPENAI_API_KEY")
-api_model = _secret("OPENAI_MODEL")
+api_key = _secret("GOOGLE_API_KEY") or _secret("GEMINI_API_KEY")
+api_model = _secret("GEMINI_MODEL")
 ai_status = get_ai_status(api_key=api_key, model=api_model)
 
 page_copy = {
@@ -414,7 +453,7 @@ with st.sidebar:
     st.caption("County early warning & response")
     st.markdown('<div class="mp-side-label">Signed in</div>', unsafe_allow_html=True)
     st.caption(st.session_state.get("authenticated_user", "Demo operator"))
-    if st.button("Log out", key="logout", width="stretch"):
+    if st.button("Log out", key="logout", type="primary", icon=":material/logout:", width="stretch"):
         st.session_state.clear()
         st.rerun()
     st.markdown('<div class="mp-side-label">Workspace</div>', unsafe_allow_html=True)
@@ -433,8 +472,8 @@ with st.sidebar:
     if ai_status["configured"]:
         st.success(f"Connected · {ai_status['model']}")
     else:
-        st.warning("API key not configured")
-        st.caption("Add OPENAI_API_KEY to .env.local or .streamlit/secrets.toml, then restart.")
+        st.warning("Gemini key not configured")
+        st.caption("Add GEMINI_API_KEY to .env.local or .streamlit/secrets.toml, then restart.")
     st.divider()
     st.caption("Aggregate operational data only. Never upload names, phone numbers, patient IDs, or addresses.")
 
@@ -655,10 +694,10 @@ elif active_page == "Supply data":
 elif active_page == "AI analyst":
     st.write("Generate a high-level management review from the latest aggregate clinical, environmental, and supply data.")
     if ai_status["configured"]:
-        st.success(f"OpenAI Responses API connected · {ai_status['model']} · key remains server-side")
+        st.success(f"Google Gemini connected · {ai_status['model']} · key remains server-side")
     else:
-        st.warning("The analyst needs OPENAI_API_KEY in .env.local or .streamlit/secrets.toml. Restart Streamlit after adding it.")
-        st.code("OPENAI_API_KEY=your_key_here\nOPENAI_MODEL=gpt-6-astra", language="bash")
+        st.warning("The analyst needs GEMINI_API_KEY in .env.local or .streamlit/secrets.toml. Restart Streamlit after adding it.")
+        st.code("GEMINI_API_KEY=your_key_here\nGEMINI_MODEL=gemini-3.8-flash", language="bash")
 
     ai_scope = st.selectbox(
         "Review scope",
@@ -693,6 +732,6 @@ elif active_page == "AI analyst":
     if ai_result:
         if ai_result.get("sourceUpdatedAt") != dataset["metadata"].get("updatedAt"):
             st.warning("The dataset changed after this review was generated. Generate a new review for current evidence.")
-        _render_ai_review(ai_result)
+        _render_ai_review(ai_result, dataset)
     else:
         st.info("No live review has been generated in this session.")

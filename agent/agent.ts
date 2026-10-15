@@ -1,8 +1,8 @@
 import { defineAgent } from "eve";
-import { openai } from "eve/models/openai";
+import { geminiModel } from "./model.js";
 
 export default defineAgent({
-  model: openai("gpt-6-astra"),
+  model: geminiModel,
   modelContextWindowTokens: 128_000,
   reasoning: "high",
   tool: false,

@@ -19,6 +19,7 @@
     "check": "node --check src/server.mjs && node --check src/ai.mjs && node --check src/config.mjs && node --check src/domain/engine.mjs && node --check src/domain/imports.mjs && node --check src/domain/store.mjs && node --check public/app.js"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.96",
     "ai": "^7.0.0",
     "eve": "^0.79.0",
     "zod": "^4.0.0"

@@ -14,7 +14,7 @@ export default defineTool({
   execute({ zoneId }) {
     const snapshot = buildNetworkSnapshot(loadDataset());
     const assessments = zoneId
-      ? snapshot.assessments.filter((assessment) => assessment.zoneId === zoneId)
+      ? snapshot.assessments.filter((assessment: { zoneId: string }) => assessment.zoneId === zoneId)
       : snapshot.assessments;
     if (assessments.length === 0) throw new Error(`Unknown zone: ${zoneId}`);
     return {

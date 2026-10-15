@@ -18,6 +18,7 @@ from malariapulse.core import (
     plan_resources,
     run_response_cycle,
 )
+from malariapulse.report import ai_report_filename, build_ai_report_pdf, report_jurisdiction
 
 
 SAMPLE_REVIEW = {
@@ -161,7 +162,7 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(saved["metadata"]["reportingWeek"], "2026-W42")
             self.assertEqual(saved["metadata"]["lastUpdatedSource"], "supply-entry")
 
-    def test_ai_uses_structured_responses_and_current_network_data(self):
+    def test_ai_uses_gemini_structured_output_and_current_network_data(self):
         dataset = load_seed_data()
         dataset["zones"][4]["weeklyCases"][-1] = 99
         captured = {}
@@ -169,18 +170,46 @@ class CoreTests(unittest.TestCase):
         def fake_request(payload, api_key):
             captured["payload"] = payload
             captured["api_key"] = api_key
-            return {"id": "resp_test", "output_text": json.dumps(SAMPLE_REVIEW)}
+            return {
+                "responseId": "resp_test",
+                "candidates": [{"content": {"parts": [{"text": json.dumps(SAMPLE_REVIEW)}]}}],
+            }
 
         result = create_ai_review(
             dataset,
             scope_id="network",
-            api_key="sk-test-key-not-a-real-secret-12345",
+            api_key="gemini-test-key-not-a-real-secret-12345",
             request_fn=fake_request,
         )
-        self.assertFalse(captured["payload"]["store"])
-        self.assertEqual(captured["payload"]["text"]["format"]["type"], "json_schema")
-        self.assertIn('"currentCases":99', captured["payload"]["input"])
+        self.assertEqual(captured["payload"]["generationConfig"]["responseMimeType"], "application/json")
+        self.assertEqual(captured["payload"]["generationConfig"]["responseJsonSchema"]["type"], "object")
+        self.assertIn('"currentCases":99', captured["payload"]["contents"][0]["parts"][0]["text"])
+        self.assertIn("senior public-health operations analyst", captured["payload"]["systemInstruction"]["parts"][0]["text"])
         self.assertEqual(result["review"]["headline"], SAMPLE_REVIEW["headline"])
+        self.assertEqual(result["responseId"], "resp_test")
+
+    def test_ai_review_pdf_uses_the_selected_subcounty_letterhead(self):
+        dataset = load_seed_data()
+        result = {
+            "review": SAMPLE_REVIEW,
+            "model": "gemini-3.8-flash",
+            "responseId": "resp_test",
+            "generatedAt": "2026-10-15T09:00:00.000Z",
+            "sourceUpdatedAt": dataset["metadata"]["updatedAt"],
+            "scope": {
+                "type": "zone",
+                "id": "nyakach-north",
+                "label": "Nyakach North",
+                "subcounty": "Nyakach",
+            },
+        }
+
+        report = build_ai_report_pdf(result, dataset)
+
+        self.assertTrue(report.startswith(b"%PDF-"))
+        self.assertGreater(len(report), 2_500)
+        self.assertEqual(report_jurisdiction(result, dataset), "Nyakach Sub-County")
+        self.assertEqual(ai_report_filename(result, dataset), "malariapulse-ai-report-nyakach-sub-county-2026-W41.pdf")
 
 
 if __name__ == "__main__":

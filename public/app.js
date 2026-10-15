@@ -16,7 +16,7 @@ const viewCopy = {
   clinical: ["Clinical data entry", "Surveillance inputs · Aggregated reporting"],
   environment: ["Environmental data entry", "Surveillance inputs · Transmission conditions"],
   supply: ["Supply telemetry", "Resource inputs · Facility stock"],
-  ai: ["AI operations analyst", "Live intelligence · OpenAI Responses API"]
+  ai: ["AI operations analyst", "Live intelligence · Google Gemini API"]
 };
 const importSchemas = {
   clinical: {
