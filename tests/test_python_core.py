@@ -1,6 +1,13 @@
 import json
+import tempfile
 import unittest
+from io import BytesIO
+from pathlib import Path
+from unittest.mock import patch
 
+from openpyxl import Workbook
+
+import malariapulse.core as core
 from malariapulse.ai import create_ai_review
 from malariapulse.core import (
     apply_parsed_import,
@@ -73,6 +80,86 @@ class CoreTests(unittest.TestCase):
         preview = parse_data_import("environment", "unsafe.csv", content, load_seed_data())
         self.assertFalse(preview["canApply"])
         self.assertIn("Patient-identifying columns", " ".join(preview["fileErrors"]))
+
+    def test_semicolon_delimited_txt_is_supported(self):
+        content = (
+            "zone_id;rainfall_7d_mm;temperature_c;humidity_pct\n"
+            "kisumu-west;61.5;27.2;68\n"
+        ).encode()
+        preview = parse_data_import("environment", "environment.txt", content, load_seed_data())
+        self.assertTrue(preview["canApply"])
+        self.assertEqual(preview["format"], "txt")
+        self.assertEqual(preview["normalizedRows"][0]["rainfall7dMm"], 61.5)
+
+    def test_tab_separated_supply_file_is_supported(self):
+        content = (
+            "clinic_id\tstock_rdt\tstock_act\tstock_nets\tweekly_use_rdt\tweekly_use_act\tweekly_use_nets\n"
+            "chulaimbo-sch\t260\t180\t110\t46\t28\t11\n"
+        ).encode()
+        preview = parse_data_import("supply", "supply.tsv", content, load_seed_data())
+        self.assertTrue(preview["canApply"])
+        self.assertEqual(preview["normalizedRows"][0]["weeklyUse"]["act"], 28)
+
+    def test_json_rows_wrapper_is_supported(self):
+        content = json.dumps(
+            {"rows": [{"zone_id": "kisumu-west", "rainfall_7d_mm": 61.5, "temperature_c": 27.2, "humidity_pct": 68}]}
+        ).encode()
+        preview = parse_data_import("environment", "environment.json", content, load_seed_data())
+        self.assertTrue(preview["canApply"])
+        self.assertEqual(preview["normalizedRows"][0]["temperatureC"], 27.2)
+
+    def test_first_html_table_is_supported(self):
+        content = b"""
+        <html><body><table>
+          <tr><th>zone_id</th><th>rainfall_7d_mm</th><th>temperature_c</th><th>humidity_pct</th></tr>
+          <tr><td>kisumu-west</td><td>62</td><td>27.3</td><td>69</td></tr>
+        </table></body></html>
+        """
+        preview = parse_data_import("environment", "environment.html", content, load_seed_data())
+        self.assertTrue(preview["canApply"])
+        self.assertEqual(preview["format"], "html")
+        self.assertEqual(preview["normalizedRows"][0]["humidityPct"], 69)
+
+    def test_first_excel_sheet_is_supported(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["clinic_id", "stock_rdt", "stock_act", "stock_nets", "weekly_use_rdt", "weekly_use_act", "weekly_use_nets"])
+        sheet.append(["chulaimbo-sch", 260, 180, 110, 46, 28, 11])
+        content = BytesIO()
+        workbook.save(content)
+        workbook.close()
+        preview = parse_data_import("supply", "supply.xlsx", content.getvalue(), load_seed_data())
+        self.assertTrue(preview["canApply"])
+        self.assertEqual(preview["format"], "xlsx")
+        self.assertEqual(preview["normalizedRows"][0]["stock"]["rdt"], 260)
+
+    def test_manual_save_functions_persist_clinical_environment_and_supply_data(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            seed_path = temporary_path / "seed.json"
+            operational_path = temporary_path / "operational.json"
+            seed_path.write_text(json.dumps(load_seed_data()), encoding="utf-8")
+
+            with (
+                patch.object(core, "SEED_PATH", seed_path),
+                patch.object(core, "OPERATIONAL_PATH", operational_path),
+            ):
+                core.update_clinical("nyakach-north", [21, 24, 29, 37, 55, 81], 240, 81, "2026-W42")
+                core.update_environment("nyakach-north", 88.5, 27.4, 79)
+                core.update_supply(
+                    "nyakach-ch",
+                    {"rdt": 310, "act": 205, "nets": 90},
+                    {"rdt": 63, "act": 39, "nets": 14},
+                )
+
+            saved = json.loads(operational_path.read_text(encoding="utf-8"))
+            zone = next(item for item in saved["zones"] if item["id"] == "nyakach-north")
+            clinic = next(item for item in saved["clinics"] if item["id"] == "nyakach-ch")
+            self.assertEqual(zone["weeklyCases"], [21, 24, 29, 37, 55, 81])
+            self.assertEqual(zone["environment"]["rainfall7dMm"], 88.5)
+            self.assertEqual(clinic["stock"]["rdt"], 310)
+            self.assertEqual(saved["metadata"]["reportingWeek"], "2026-W42")
+            self.assertEqual(saved["metadata"]["lastUpdatedSource"], "supply-entry")
 
     def test_ai_uses_structured_responses_and_current_network_data(self):
         dataset = load_seed_data()

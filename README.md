@@ -16,6 +16,7 @@ The repository contains three compatible surfaces backed by the same operational
 - Draft redistribution routes that preserve donor buffers and produce county restock requests for unresolved gaps.
 - English and Kiswahili resident/CHW drafts with character and SMS-segment counts.
 - A Streamlit operations dashboard with a risk watchlist, trends, inventory, agent response review, and approve/reject ledger.
+- A polished session-based demo login and sidebar logout flow, with credentials that can be overridden from server configuration.
 - A primary bulk-upload workspace for CSV, TSV, and JSON clinical, environmental, and supply files, with downloadable templates, full-file validation, and row-level errors.
 - Optional single-record tabs for clinical reports, environmental observations, and facility supply telemetry; saved values immediately feed scoring and agent tools.
 - A live AI operations analyst backed by the OpenAI Responses API, with county-wide and micro-zone reviews, structured findings, ranked priorities, and explicit data-quality notes.
@@ -61,16 +62,34 @@ cp .env.example .env.local
 python3 -m streamlit run streamlit_app.py
 ```
 
-Open `http://localhost:8501`. The Streamlit tabs provide the full workflow: overview and agent response cycles, validated bulk upload, single-zone clinical and environmental corrections, facility supply entry, and live AI reviews. Every micro-zone field is a dropdown populated from the current dataset.
+Open `http://localhost:8501`. The Streamlit sidebar provides the full workflow: overview and agent response cycles, validated bulk upload, single-zone clinical and environmental corrections, facility supply entry, and live AI reviews. Every micro-zone field is a dropdown populated from the current dataset.
 
-The dashboard and existing Node/Eve implementation read and write the same ignored `data/operational.json` file, so data entered through either interface remains available to the others. Uploaded CSV, TSV, and JSON files are limited to 1,000 aggregate rows and 2 MB. One invalid row blocks the entire import.
+Use these sample credentials for the local demo:
+
+```text
+Username: admin@malariapulse.demo
+Password: DemoPulse!2026
+```
+
+These defaults are for demonstration only. Override both values in `.env.local` before sharing or deploying the app:
+
+```bash
+DEMO_USERNAME=your_demo_username
+DEMO_PASSWORD=use_a_new_strong_password
+```
+
+The dashboard and existing Node/Eve implementation read and write the same ignored `data/operational.json` file, so data entered through either interface remains available to the others. Uploaded CSV, TSV, TXT, JSON, XLSX, and HTML/HTM files are limited to 1,000 aggregate rows and 2 MB. TXT files may use comma, tab, semicolon, or pipe delimiters. Excel imports use the first sheet and HTML imports use the first table. One invalid row blocks the entire import.
 
 The OpenAI key stays on the Streamlit server. As an alternative to `.env.local`, create an ignored `.streamlit/secrets.toml`:
 
 ```toml
 OPENAI_API_KEY = "your_key_here"
 OPENAI_MODEL = "gpt-6-astra"
+DEMO_USERNAME = "your_demo_username"
+DEMO_PASSWORD = "use_a_new_strong_password"
 ```
+
+This lightweight session gate is suitable for a prototype, not production identity management. Replace it with managed authentication, server-side sessions, role-based access, and audit logging before deployment.
 
 The analyst uses the latest saved dataset for each request and returns a structured high-level review with evidence-backed findings, ranked actions, data-quality notes, and limitations. Resource movements and outreach remain drafts until a human reviewer approves them.
 

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hmac
 from datetime import datetime
 from typing import Any
 
 import pandas as pd
 import streamlit as st
 
-from malariapulse.ai import AIAnalystError, create_ai_review, get_ai_status
+from malariapulse.ai import AIAnalystError, create_ai_review, get_ai_status, get_setting
 from malariapulse.core import (
     RESOURCE_LABELS,
     apply_data_import,
@@ -36,21 +37,23 @@ st.markdown(
     """
     <style>
     :root {
-      --mp-ink: #142923;
-      --mp-muted: #60746d;
-      --mp-green: #087f5b;
-      --mp-mint: #dff7ec;
-      --mp-amber: #f4a261;
-      --mp-red: #d1495b;
-      --mp-border: #dce8e3;
+      --mp-ink: #15233a;
+      --mp-muted: #647188;
+      --mp-blue: #246bfd;
+      --mp-blue-deep: #1555d7;
+      --mp-blue-soft: #e9f0ff;
+      --mp-green: #14865f;
+      --mp-amber: #e49b24;
+      --mp-red: #e6534c;
+      --mp-border: #e5e9ef;
     }
-    .stApp { background: #f7faf8; color: var(--mp-ink); }
-    [data-testid="stSidebar"] { background: #102d27; }
-    [data-testid="stSidebar"] * { color: #eef9f4; }
+    .stApp { background: #f5f7fa; color: var(--mp-ink); }
+    [data-testid="stSidebar"] { background: #101f34; }
+    [data-testid="stSidebar"] * { color: #d8e2f1; }
     [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.14); }
     .mp-brand { font-size: 1.35rem; font-weight: 760; letter-spacing: -.03em; margin-bottom: .1rem; }
-    .mp-brand span { color: #6ee7b7; }
-    .mp-side-label { color: #b9d4c9; font-size: .76rem; text-transform: uppercase; letter-spacing: .08em; margin-top: 1.25rem; }
+    .mp-brand span { color: #6ea1ff; }
+    .mp-side-label { color: #75849b; font-size: .67rem; font-weight: 800; text-transform: uppercase; letter-spacing: .11em; margin: 1.25rem 0 .5rem; }
     .mp-header { padding: .35rem 0 .9rem; border-bottom: 1px solid var(--mp-border); margin-bottom: 1rem; }
     .mp-title { font-size: 2rem; font-weight: 760; letter-spacing: -.045em; line-height: 1.05; margin: 0; }
     .mp-subtitle { color: var(--mp-muted); margin: .4rem 0 0; font-size: .95rem; }
@@ -60,17 +63,27 @@ st.markdown(
     .mp-chip-high { background: #ffe2c4; color: #a34700; }
     .mp-chip-critical { background: #ffe1e5; color: #a32134; }
     .mp-panel { background: white; border: 1px solid var(--mp-border); border-radius: 14px; padding: 1rem; }
-    .mp-eyebrow { color: var(--mp-green); font-size: .74rem; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; }
+    .mp-eyebrow { color: var(--mp-blue); font-size: .74rem; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; }
     .mp-headline { font-size: 1.28rem; font-weight: 730; letter-spacing: -.02em; margin: .25rem 0; }
     .mp-muted { color: var(--mp-muted); }
-    .mp-finding { background: white; border-left: 4px solid var(--mp-green); border-radius: 4px 12px 12px 4px; padding: .85rem 1rem; margin-bottom: .75rem; }
+    .mp-finding { background: white; border-left: 4px solid var(--mp-blue); border-radius: 4px 12px 12px 4px; padding: .85rem 1rem; margin-bottom: .75rem; }
     div[data-testid="stMetric"] { background: white; border: 1px solid var(--mp-border); border-radius: 14px; padding: .85rem 1rem; }
     div[data-testid="stMetricLabel"] { color: var(--mp-muted); }
     div[data-testid="stMetricValue"] { color: var(--mp-ink); }
     .stTabs [data-baseweb="tab-list"] { gap: .25rem; border-bottom: 1px solid var(--mp-border); }
     .stTabs [data-baseweb="tab"] { height: 2.8rem; border-radius: 9px 9px 0 0; padding: 0 .9rem; }
-    .stTabs [aria-selected="true"] { background: #e8f6ef; color: var(--mp-green); }
-    .stButton > button[kind="primary"] { background: var(--mp-green); border-color: var(--mp-green); }
+    .stTabs [aria-selected="true"] { background: var(--mp-blue-soft); color: var(--mp-blue); }
+    .stButton > button[kind="primary"] { background: var(--mp-blue); border-color: var(--mp-blue); }
+    .stButton > button[kind="primary"]:hover { background: var(--mp-blue-deep); border-color: var(--mp-blue-deep); }
+    .mp-login-brand { text-align: center; color: var(--mp-ink); font-size: 1.65rem; font-weight: 780; letter-spacing: -.04em; margin-bottom: .1rem; }
+    .mp-login-brand span { color: var(--mp-blue); }
+    .mp-login-subtitle { text-align: center; color: var(--mp-muted); font-size: .86rem; margin-bottom: 1.25rem; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] { gap: .2rem; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label { border-left: 3px solid transparent; border-radius: 8px; padding: .58rem .65rem; transition: .16s ease; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background: rgba(255,255,255,.055); }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) { background: #1d3659; border-left-color: #5d91ff; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label p { color: #9eacc1; font-size: .84rem; font-weight: 650; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) p { color: #fff; }
     @media (max-width: 800px) { .mp-title { font-size: 1.55rem; } }
     </style>
     """,
@@ -96,6 +109,68 @@ def _secret(name: str) -> str | None:
         return None
 
 
+def _authentication_config() -> tuple[str, str, bool]:
+    username_override = _secret("DEMO_USERNAME") or get_setting("DEMO_USERNAME")
+    password_override = _secret("DEMO_PASSWORD") or get_setting("DEMO_PASSWORD")
+    return (
+        username_override or "admin@malariapulse.demo",
+        password_override or "DemoPulse!2026",
+        bool(username_override or password_override),
+    )
+
+
+def _render_login() -> None:
+    configured_username, configured_password, credentials_overridden = _authentication_config()
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] { display: none; }
+        [data-testid="stHeader"] { background: transparent; }
+        .block-container { max-width: 64rem; padding-top: 5rem; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    _, login_column, _ = st.columns([1, 1.05, 1])
+    with login_column:
+        st.markdown(
+            '<div class="mp-login-brand">Malaria<span>Pulse</span></div>'
+            '<div class="mp-login-subtitle">County early warning & response</div>',
+            unsafe_allow_html=True,
+        )
+        with st.container(border=True):
+            st.subheader("Sign in")
+            st.caption("Enter your credentials to continue.")
+            with st.form("login-form"):
+                username = st.text_input(
+                    "Email or username",
+                    placeholder="name@county-health.example",
+                    key="login-username",
+                )
+                password = st.text_input(
+                    "Password",
+                    type="password",
+                    placeholder="Enter your password",
+                    key="login-password",
+                )
+                submitted = st.form_submit_button("Sign in", type="primary", width="stretch")
+                if submitted:
+                    username_matches = hmac.compare_digest(username.strip(), configured_username)
+                    password_matches = hmac.compare_digest(password, configured_password)
+                    if username_matches and password_matches:
+                        st.session_state["authenticated"] = True
+                        st.session_state["authenticated_user"] = configured_username
+                        st.rerun()
+                    else:
+                        st.error("The username or password is incorrect. Check the demo credentials and try again.")
+
+        if credentials_overridden:
+            st.caption("Login credentials are configured by the server.")
+        else:
+            st.caption("Demo credentials")
+            st.code("admin@malariapulse.demo\nDemoPulse!2026", language=None)
+
+
 def _zone_names(dataset: dict[str, Any]) -> dict[str, str]:
     return {zone["id"]: zone["name"] for zone in dataset["zones"]}
 
@@ -107,6 +182,94 @@ def _clinic_names(dataset: dict[str, Any]) -> dict[str, str]:
 def _risk_chip(level: str) -> str:
     safe_level = level if level in {"low", "watch", "high", "critical"} else "watch"
     return f'<span class="mp-chip mp-chip-{safe_level}">{safe_level}</span>'
+
+
+def _set_flash(page: str, message: str) -> None:
+    """Keep save/import feedback visible after Streamlit reloads the dataset."""
+    st.session_state["data-flash"] = {"page": page, "message": message}
+    st.session_state.pop("ai_result", None)
+
+
+def _render_flash(page: str) -> None:
+    flash = st.session_state.get("data-flash")
+    if flash and flash.get("page") == page:
+        st.success(flash["message"], icon="✅")
+        del st.session_state["data-flash"]
+
+
+def _render_file_upload(kind: str, dataset: dict[str, Any], *, key_prefix: str, return_page: str) -> None:
+    kind_labels = {
+        "clinical": "Clinical surveillance",
+        "environment": "Environmental observations",
+        "supply": "Facility supply telemetry",
+    }
+    label = kind_labels[kind]
+    st.write(f"Upload aggregate {label.lower()} data. Every row is validated before anything is saved.")
+    template_col, note_col = st.columns([1, 3])
+    with template_col:
+        st.download_button(
+            "Download current CSV template",
+            data=import_template(kind, dataset),
+            file_name=f"malariapulse-{kind}-template.csv",
+            mime="text/csv",
+            width="stretch",
+            key=f"{key_prefix}-template",
+        )
+    with note_col:
+        st.caption(
+            "Accepted: CSV, TSV, TXT, JSON, XLSX, HTML/HTM · first Excel sheet or HTML table · "
+            "maximum 1,000 rows / 2 MB · invalid files are never partially applied"
+        )
+    uploaded = st.file_uploader(
+        f"Choose {label.lower()} file",
+        type=["csv", "tsv", "txt", "json", "xlsx", "html", "htm"],
+        key=f"{key_prefix}-uploader",
+    )
+    if uploaded is None:
+        st.info("Download the template first if you need the accepted IDs and column names.")
+        return
+
+    try:
+        preview = parse_data_import(kind, uploaded.name, uploaded.getvalue(), dataset)
+    except ValueError as error:
+        st.error(str(error))
+        return
+
+    status_first, status_second, status_third = st.columns(3)
+    status_first.metric("Rows", preview["rowCount"])
+    status_second.metric("Valid", preview["validCount"])
+    status_third.metric("Invalid", preview["invalidCount"])
+    for message in preview["fileErrors"]:
+        st.error(message)
+    for message in preview["warnings"]:
+        st.warning(message)
+    table_rows = [
+        {
+            "Row": row["rowNumber"],
+            "ID": row["identifier"],
+            "Status": "Valid" if row["valid"] else "Invalid",
+            "Preview": row["preview"],
+            "Errors": " ".join(row["errors"]),
+        }
+        for row in preview["rows"]
+    ]
+    st.dataframe(pd.DataFrame(table_rows), hide_index=True, width="stretch")
+    if not preview["canApply"]:
+        st.info("Correct every error and upload the file again before applying it.")
+        return
+
+    if st.button(
+        f"Apply {preview['rowCount']} validated row(s)",
+        type="primary",
+        width="stretch",
+        key=f"{key_prefix}-apply",
+    ):
+        apply_data_import(preview)
+        _set_flash(
+            return_page,
+            f"{label} import saved successfully. All dashboard calculations now use the updated data.",
+        )
+        st.rerun()
 
 
 def _render_cycle(cycle: dict[str, Any] | None) -> None:
@@ -224,6 +387,11 @@ def _render_ai_review(result: dict[str, Any]) -> None:
     )
 
 
+if not st.session_state.get("authenticated", False):
+    _render_login()
+    st.stop()
+
+
 dataset = load_dataset()
 snapshot = build_network_snapshot(dataset)
 zone_names = _zone_names(dataset)
@@ -232,9 +400,30 @@ api_key = _secret("OPENAI_API_KEY")
 api_model = _secret("OPENAI_MODEL")
 ai_status = get_ai_status(api_key=api_key, model=api_model)
 
+page_copy = {
+    "Overview": ("Malaria operations command view", "Surveillance signals, county priorities, and multi-agent response drafts."),
+    "Bulk data upload": ("Bulk data upload", "Validate and apply aggregate clinical, environmental, or supply files."),
+    "Clinical data": ("Clinical surveillance entry", "Correct one micro-zone or use bulk upload for routine reporting."),
+    "Environmental data": ("Environmental observation entry", "Update rainfall, temperature, and humidity by micro-zone."),
+    "Supply data": ("Facility supply entry", "Review and update facility stock and average weekly use."),
+    "AI analyst": ("AI operations analyst", "Generate an evidence-grounded review from the latest saved data."),
+}
+
 with st.sidebar:
     st.markdown('<div class="mp-brand">Malaria<span>Pulse</span></div>', unsafe_allow_html=True)
     st.caption("County early warning & response")
+    st.markdown('<div class="mp-side-label">Signed in</div>', unsafe_allow_html=True)
+    st.caption(st.session_state.get("authenticated_user", "Demo operator"))
+    if st.button("Log out", key="logout", width="stretch"):
+        st.session_state.clear()
+        st.rerun()
+    st.markdown('<div class="mp-side-label">Workspace</div>', unsafe_allow_html=True)
+    active_page = st.radio(
+        "Workspace",
+        list(page_copy),
+        label_visibility="collapsed",
+        key="workspace-page",
+    )
     st.markdown('<div class="mp-side-label">Reporting context</div>', unsafe_allow_html=True)
     st.write(f"**{dataset['metadata']['county']}, {dataset['metadata']['country']}**")
     st.write(f"Week {dataset['metadata']['reportingWeek']}")
@@ -249,21 +438,19 @@ with st.sidebar:
     st.divider()
     st.caption("Aggregate operational data only. Never upload names, phone numbers, patient IDs, or addresses.")
 
+page_title, page_subtitle = page_copy[active_page]
 st.markdown(
-    """
+    f"""
     <div class="mp-header">
-      <div class="mp-title">Malaria operations command view</div>
-      <div class="mp-subtitle">Surveillance, resource readiness, intervention drafts, and an evidence-grounded AI analyst in one workspace.</div>
+      <div class="mp-title">{page_title}</div>
+      <div class="mp-subtitle">{page_subtitle}</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
+_render_flash(active_page)
 
-overview_tab, upload_tab, clinical_tab, environment_tab, supply_tab, ai_tab = st.tabs(
-    ["Overview", "Bulk upload", "Clinical", "Environment", "Supply", "AI analyst"]
-)
-
-with overview_tab:
+if active_page == "Overview":
     summary = snapshot["summary"]
     first, second, third, fourth = st.columns(4)
     first.metric("Zones monitored", summary["zonesMonitored"])
@@ -301,7 +488,7 @@ with overview_tab:
                 "Reported cases": selected_zone["weeklyCases"],
             }
         ).set_index("Week")
-        st.line_chart(trend, color="#087f5b")
+        st.line_chart(trend, color="#246bfd")
         st.caption(
             f"{selected_zone['tests']} tests · {selected_zone['positiveTests']} positive · "
             f"{assessment['positivityPct']}% positivity · {assessment['incidencePerThousand']} cases per 1,000"
@@ -348,109 +535,70 @@ with overview_tab:
         )
         st.warning("This is an uncalibrated MVP signal, not a confirmed outbreak, diagnostic system, or autonomous dispatch decision.")
 
-with upload_tab:
-    st.subheader("Bulk data upload")
-    st.write("Upload aggregate clinical, environmental, or supply data. The full file is validated before any row is saved.")
+elif active_page == "Bulk data upload":
     kind_labels = {"clinical": "Clinical surveillance", "environment": "Environmental observations", "supply": "Facility supply telemetry"}
     upload_kind = st.selectbox("Data type", list(kind_labels), format_func=kind_labels.get, key="upload-kind")
-    template_col, note_col = st.columns([1, 3])
-    with template_col:
-        st.download_button(
-            "Download current CSV template",
-            data=import_template(upload_kind, dataset),
-            file_name=f"malariapulse-{upload_kind}-template.csv",
-            mime="text/csv",
-            width="stretch",
-        )
-    with note_col:
-        st.caption("Accepted formats: CSV, TSV, and JSON · maximum 1,000 rows / 2 MB · invalid files are never partially applied")
-    uploaded = st.file_uploader(
-        f"Choose {kind_labels[upload_kind].lower()} file",
-        type=["csv", "tsv", "json"],
-        key=f"uploader-{upload_kind}",
-    )
-    if uploaded is not None:
-        try:
-            preview = parse_data_import(upload_kind, uploaded.name, uploaded.getvalue(), dataset)
-            status_first, status_second, status_third = st.columns(3)
-            status_first.metric("Rows", preview["rowCount"])
-            status_second.metric("Valid", preview["validCount"])
-            status_third.metric("Invalid", preview["invalidCount"])
-            for message in preview["fileErrors"]:
-                st.error(message)
-            for message in preview["warnings"]:
-                st.warning(message)
-            table_rows = [
-                {
-                    "Row": row["rowNumber"],
-                    "ID": row["identifier"],
-                    "Status": "Valid" if row["valid"] else "Invalid",
-                    "Preview": row["preview"],
-                    "Errors": " ".join(row["errors"]),
-                }
-                for row in preview["rows"]
-            ]
-            st.dataframe(pd.DataFrame(table_rows), hide_index=True, width="stretch")
-            if preview["canApply"]:
-                if st.button(f"Apply {preview['rowCount']} validated row(s)", type="primary", key="apply-upload"):
-                    apply_data_import(preview)
-                    st.success("Import applied. All dashboard calculations now use the updated dataset.")
+    _render_file_upload(upload_kind, dataset, key_prefix=f"bulk-{upload_kind}", return_page="Bulk data upload")
+
+elif active_page == "Clinical data":
+    clinical_manual_tab, clinical_upload_tab = st.tabs(["Manual entry", "File upload"])
+    with clinical_manual_tab:
+        st.caption("Use this form for a single-zone correction.")
+        clinical_zone_id = st.selectbox("Micro-zone", list(zone_names), format_func=zone_names.get, key="clinical-zone")
+        clinical_zone = next(zone for zone in dataset["zones"] if zone["id"] == clinical_zone_id)
+        with st.form(f"clinical-form-{clinical_zone_id}"):
+            reporting_week = st.text_input("Reporting week", value=dataset["metadata"]["reportingWeek"], help="Format: YYYY-Www")
+            week_columns = st.columns(3)
+            weekly_cases: list[int] = []
+            for index, value in enumerate(clinical_zone["weeklyCases"]):
+                with week_columns[index % 3]:
+                    weekly_cases.append(
+                        st.number_input(f"Week {index + 1} cases", min_value=0, value=int(value), step=1, key=f"clinical-{clinical_zone_id}-{index}")
+                    )
+            tests_col, positive_col = st.columns(2)
+            tests = tests_col.number_input("Tests performed", min_value=0, value=int(clinical_zone["tests"]), step=1)
+            positive_tests = positive_col.number_input("Positive tests", min_value=0, value=int(clinical_zone["positiveTests"]), step=1)
+            submitted = st.form_submit_button("Save clinical data", type="primary", width="stretch")
+            if submitted:
+                try:
+                    update_clinical(clinical_zone_id, weekly_cases, tests, positive_tests, reporting_week)
+                    _set_flash(
+                        "Clinical data",
+                        f"Clinical data for {zone_names[clinical_zone_id]} saved successfully. The dashboard and AI analyst now use these values.",
+                    )
                     st.rerun()
-            else:
-                st.info("Correct every error and upload the file again before applying it.")
-        except ValueError as error:
-            st.error(str(error))
-    else:
-        st.info("Download the template first if you need the accepted IDs and column names.")
+                except ValueError as error:
+                    st.error(str(error))
+    with clinical_upload_tab:
+        _render_file_upload("clinical", dataset, key_prefix="clinical-inline", return_page="Clinical data")
 
-with clinical_tab:
-    st.subheader("Clinical surveillance entry")
-    st.caption("Use bulk upload for routine reporting; this form is for a single-zone correction.")
-    clinical_zone_id = st.selectbox("Micro-zone", list(zone_names), format_func=zone_names.get, key="clinical-zone")
-    clinical_zone = next(zone for zone in dataset["zones"] if zone["id"] == clinical_zone_id)
-    with st.form(f"clinical-form-{clinical_zone_id}"):
-        reporting_week = st.text_input("Reporting week", value=dataset["metadata"]["reportingWeek"], help="Format: YYYY-Www")
-        week_columns = st.columns(3)
-        weekly_cases: list[int] = []
-        for index, value in enumerate(clinical_zone["weeklyCases"]):
-            with week_columns[index % 3]:
-                weekly_cases.append(
-                    st.number_input(f"Week {index + 1} cases", min_value=0, value=int(value), step=1, key=f"clinical-{clinical_zone_id}-{index}")
-                )
-        tests_col, positive_col = st.columns(2)
-        tests = tests_col.number_input("Tests performed", min_value=0, value=int(clinical_zone["tests"]), step=1)
-        positive_tests = positive_col.number_input("Positive tests", min_value=0, value=int(clinical_zone["positiveTests"]), step=1)
-        submitted = st.form_submit_button("Save clinical data", type="primary")
-        if submitted:
-            try:
-                update_clinical(clinical_zone_id, weekly_cases, tests, positive_tests, reporting_week)
-                st.success("Clinical data saved.")
-                st.rerun()
-            except ValueError as error:
-                st.error(str(error))
+elif active_page == "Environmental data":
+    environment_manual_tab, environment_upload_tab = st.tabs(["Manual entry", "File upload"])
+    with environment_manual_tab:
+        st.caption("Use this form for a single-zone correction.")
+        environment_zone_id = st.selectbox("Micro-zone", list(zone_names), format_func=zone_names.get, key="environment-zone")
+        environment_zone = next(zone for zone in dataset["zones"] if zone["id"] == environment_zone_id)
+        environment = environment_zone["environment"]
+        with st.form(f"environment-form-{environment_zone_id}"):
+            rain_col, temp_col, humidity_col = st.columns(3)
+            rainfall = rain_col.number_input("Rainfall, last 7 days (mm)", min_value=0.0, max_value=2000.0, value=float(environment["rainfall7dMm"]), step=1.0)
+            temperature = temp_col.number_input("Mean temperature (°C)", min_value=-10.0, max_value=60.0, value=float(environment["temperatureC"]), step=0.1)
+            humidity = humidity_col.number_input("Mean humidity (%)", min_value=0.0, max_value=100.0, value=float(environment["humidityPct"]), step=1.0)
+            submitted = st.form_submit_button("Save environmental data", type="primary", width="stretch")
+            if submitted:
+                try:
+                    update_environment(environment_zone_id, rainfall, temperature, humidity)
+                    _set_flash(
+                        "Environmental data",
+                        f"Environmental data for {zone_names[environment_zone_id]} saved successfully. The dashboard and AI analyst now use these values.",
+                    )
+                    st.rerun()
+                except ValueError as error:
+                    st.error(str(error))
+    with environment_upload_tab:
+        _render_file_upload("environment", dataset, key_prefix="environment-inline", return_page="Environmental data")
 
-with environment_tab:
-    st.subheader("Environmental observation entry")
-    st.caption("Use bulk upload for routine feeds; this form is for a single-zone correction.")
-    environment_zone_id = st.selectbox("Micro-zone", list(zone_names), format_func=zone_names.get, key="environment-zone")
-    environment_zone = next(zone for zone in dataset["zones"] if zone["id"] == environment_zone_id)
-    environment = environment_zone["environment"]
-    with st.form(f"environment-form-{environment_zone_id}"):
-        rain_col, temp_col, humidity_col = st.columns(3)
-        rainfall = rain_col.number_input("Rainfall, last 7 days (mm)", min_value=0.0, max_value=2000.0, value=float(environment["rainfall7dMm"]), step=1.0)
-        temperature = temp_col.number_input("Mean temperature (°C)", min_value=-10.0, max_value=60.0, value=float(environment["temperatureC"]), step=0.1)
-        humidity = humidity_col.number_input("Mean humidity (%)", min_value=0.0, max_value=100.0, value=float(environment["humidityPct"]), step=1.0)
-        submitted = st.form_submit_button("Save environmental data", type="primary")
-        if submitted:
-            try:
-                update_environment(environment_zone_id, rainfall, temperature, humidity)
-                st.success("Environmental data saved.")
-                st.rerun()
-            except ValueError as error:
-                st.error(str(error))
-
-with supply_tab:
-    st.subheader("Facility supply entry")
+elif active_page == "Supply data":
     st.caption("Update stock on hand and average weekly use. Quantities are whole units.")
     supply_clinic_id = st.selectbox("Facility", list(clinic_names), format_func=clinic_names.get, key="supply-clinic")
     supply_clinic = next(clinic for clinic in dataset["clinics"] if clinic["id"] == supply_clinic_id)
@@ -471,11 +619,14 @@ with supply_tab:
             )
             for index, resource in enumerate(RESOURCE_LABELS)
         }
-        submitted = st.form_submit_button("Save supply data", type="primary")
+        submitted = st.form_submit_button("Save supply data", type="primary", width="stretch")
         if submitted:
             try:
                 update_supply(supply_clinic_id, stock, weekly_use)
-                st.success("Supply data saved.")
+                _set_flash(
+                    "Supply data",
+                    f"Supply data for {clinic_names[supply_clinic_id]} saved successfully. The dashboard and AI analyst now use these values.",
+                )
                 st.rerun()
             except ValueError as error:
                 st.error(str(error))
@@ -501,8 +652,7 @@ with supply_tab:
         )
     st.dataframe(pd.DataFrame(inventory_rows), hide_index=True, width="stretch")
 
-with ai_tab:
-    st.subheader("AI operations analyst")
+elif active_page == "AI analyst":
     st.write("Generate a high-level management review from the latest aggregate clinical, environmental, and supply data.")
     if ai_status["configured"]:
         st.success(f"OpenAI Responses API connected · {ai_status['model']} · key remains server-side")

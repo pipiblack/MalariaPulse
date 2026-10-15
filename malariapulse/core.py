@@ -10,6 +10,7 @@ import os
 import re
 from copy import deepcopy
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -551,12 +552,97 @@ def _number_field(
         return None
 
 
+class _FirstHTMLTableParser(HTMLParser):
+    """Extract cells from the first HTML table without executing or rendering markup."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.in_table = False
+        self.finished = False
+        self.in_cell = False
+        self.current_row: list[str] | None = None
+        self.current_cell: list[str] = []
+        self.rows: list[list[str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del attrs
+        tag = tag.lower()
+        if tag == "table" and not self.in_table and not self.finished:
+            self.in_table = True
+        elif self.in_table and tag == "tr":
+            self.current_row = []
+        elif self.in_table and tag in {"td", "th"} and self.current_row is not None:
+            self.in_cell = True
+            self.current_cell = []
+
+    def handle_data(self, data: str) -> None:
+        if self.in_cell:
+            self.current_cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if self.in_table and tag in {"td", "th"} and self.in_cell and self.current_row is not None:
+            self.current_row.append(" ".join("".join(self.current_cell).split()))
+            self.current_cell = []
+            self.in_cell = False
+        elif self.in_table and tag == "tr" and self.current_row is not None:
+            if any(cell.strip() for cell in self.current_row):
+                self.rows.append(self.current_row)
+            self.current_row = None
+        elif self.in_table and tag == "table":
+            self.in_table = False
+            self.finished = True
+
+
+def _records_from_rows(raw_rows: list[tuple[int, list[Any]]]) -> tuple[list[str], list[dict[str, Any]]]:
+    if not raw_rows:
+        return [], []
+    columns = [_normalize_header(cell) for cell in raw_rows[0][1]]
+    records = [
+        {
+            "row_number": row_number,
+            "column_count": len(cells),
+            "values": {
+                column: str(cells[index]).strip() if index < len(cells) and cells[index] is not None else ""
+                for index, column in enumerate(columns)
+            },
+        }
+        for row_number, cells in raw_rows[1:]
+    ]
+    return columns, records
+
+
 def _parse_uploaded(filename: str, content: bytes) -> tuple[str, list[str], list[dict[str, Any]]]:
     if len(content) > MAX_IMPORT_BYTES:
         raise ValueError("Upload files must be 2 MB or smaller.")
     extension = Path(filename).suffix.lower().lstrip(".")
-    if extension not in {"csv", "tsv", "json"}:
-        raise ValueError("Unsupported file format. Upload a .csv, .tsv, or .json file.")
+    supported = {"csv", "tsv", "txt", "json", "xlsx", "html", "htm"}
+    if extension not in supported:
+        raise ValueError("Unsupported file format. Upload CSV, TSV, TXT, JSON, XLSX, or HTML.")
+
+    if extension == "xlsx":
+        try:
+            from openpyxl import load_workbook
+        except ImportError as error:
+            raise ValueError("Excel support is unavailable. Install the dependencies in requirements.txt.") from error
+        try:
+            workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            worksheet = workbook.active
+            raw_rows: list[tuple[int, list[Any]]] = []
+            for row_number, row in enumerate(worksheet.iter_rows(values_only=True), start=1):
+                cells = list(row)
+                while cells and cells[-1] is None:
+                    cells.pop()
+                if any(cell is not None and str(cell).strip() for cell in cells):
+                    raw_rows.append((row_number, cells))
+                if len(raw_rows) > MAX_IMPORT_ROWS + 1:
+                    break
+            workbook.close()
+        except Exception as error:
+            raise ValueError("The Excel workbook could not be read. Upload a valid .xlsx file.") from error
+        columns, records = _records_from_rows(raw_rows)
+        return extension, columns, records
+
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError as error:
@@ -585,22 +671,30 @@ def _parse_uploaded(filename: str, content: bytes) -> tuple[str, list[str], list
         columns = list(dict.fromkeys(key for record in records for key in record["values"]))
         return extension, columns, records
 
+    if extension in {"html", "htm"}:
+        parser = _FirstHTMLTableParser()
+        try:
+            parser.feed(text)
+            parser.close()
+        except Exception as error:
+            raise ValueError("The HTML file could not be parsed.") from error
+        if not parser.rows:
+            raise ValueError("The HTML file does not contain a readable table.")
+        columns, records = _records_from_rows(list(enumerate(parser.rows, start=1)))
+        return "html", columns, records
+
+    delimiter = "\t" if extension == "tsv" else ","
+    if extension == "txt":
+        try:
+            delimiter = csv.Sniffer().sniff(text[:8_192], delimiters=",\t;|").delimiter
+        except csv.Error:
+            delimiter = ","
     try:
-        reader = csv.reader(io.StringIO(text), delimiter="\t" if extension == "tsv" else ",", strict=True)
+        reader = csv.reader(io.StringIO(text), delimiter=delimiter, strict=True)
         raw_rows = [(index, row) for index, row in enumerate(reader, start=1) if any(str(cell).strip() for cell in row)]
     except csv.Error as error:
         raise ValueError(f"The delimited file could not be parsed: {error}.") from error
-    if not raw_rows:
-        return extension, [], []
-    columns = [_normalize_header(cell) for cell in raw_rows[0][1]]
-    records = [
-        {
-            "row_number": row_number,
-            "column_count": len(cells),
-            "values": {column: str(cells[index]).strip() if index < len(cells) else "" for index, column in enumerate(columns)},
-        }
-        for row_number, cells in raw_rows[1:]
-    ]
+    columns, records = _records_from_rows(raw_rows)
     return extension, columns, records
 
 
