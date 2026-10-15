@@ -20,6 +20,7 @@ The repository contains three compatible surfaces backed by the same operational
 - A primary bulk-upload workspace for CSV, TSV, and JSON clinical, environmental, and supply files, with downloadable templates, full-file validation, and row-level errors.
 - Optional single-record tabs for clinical reports, environmental observations, and facility supply telemetry; saved values immediately feed scoring and agent tools.
 - A live AI operations analyst backed by the Google Gemini API, with county-wide and micro-zone reviews, structured findings, ranked priorities, and explicit data-quality notes.
+- Downloadable PDF AI reports with the selected subcounty letterhead on the first page and clean continuation pages.
 - Eve subagents for surveillance, supply, and community action, plus a root orchestrator and recurring schedule.
 - An always-on human approval gate before stock or outreach authorization.
 - Node tests for scoring, planning, messaging, and orchestration.

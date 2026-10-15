@@ -305,5 +305,9 @@ def create_ai_review(
         "generatedAt": utc_now(),
         "sourceUpdatedAt": dataset["metadata"].get("updatedAt"),
         "sourceMode": dataset["metadata"].get("mode"),
+        "source": {
+            key: dataset["metadata"].get(key)
+            for key in ("country", "county", "reportingWeek")
+        },
         "scope": context["scope"],
     }

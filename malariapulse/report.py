@@ -57,14 +57,16 @@ def report_jurisdiction(result: dict[str, Any], dataset: dict[str, Any]) -> str:
     if subcounty:
         lowered = subcounty.lower().replace(" ", "").replace("-", "")
         return subcounty if lowered.endswith("subcounty") else f"{subcounty} Sub-County"
-    county = str(dataset.get("metadata", {}).get("county") or "County network").strip()
+    source = result.get("source") or dataset.get("metadata") or {}
+    county = str(source.get("county") or "County network").strip()
     return county if county.lower().endswith("county") else f"{county} County"
 
 
 def ai_report_filename(result: dict[str, Any], dataset: dict[str, Any]) -> str:
     jurisdiction = report_jurisdiction(result, dataset)
     slug = re.sub(r"[^a-z0-9]+", "-", jurisdiction.lower()).strip("-")
-    week = re.sub(r"[^A-Za-z0-9-]+", "-", str(dataset.get("metadata", {}).get("reportingWeek") or "current"))
+    source = result.get("source") or dataset.get("metadata") or {}
+    week = re.sub(r"[^A-Za-z0-9-]+", "-", str(source.get("reportingWeek") or "current"))
     return f"malariapulse-ai-report-{slug}-{week}.pdf"
 
 
@@ -158,7 +160,7 @@ def build_ai_report_pdf(result: dict[str, Any], dataset: dict[str, Any]) -> byte
     """Render a structured AI review as a multipage PDF with a first-page letterhead."""
 
     review = result["review"]
-    metadata = dataset.get("metadata") or {}
+    metadata = result.get("source") or dataset.get("metadata") or {}
     scope = result.get("scope") or {}
     jurisdiction = report_jurisdiction(result, dataset)
     scope_label = str(scope.get("label") or jurisdiction)

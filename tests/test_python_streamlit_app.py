@@ -58,7 +58,10 @@ class StreamlitDataEntryTests(unittest.TestCase):
 
     def test_logout_clears_the_authenticated_session(self):
         app = self._login(self._new_app())
-        app.button(key="logout").click().run(timeout=45)
+        logout = app.button(key="logout")
+        self.assertEqual(logout.proto.type, "primary")
+        self.assertEqual(logout.proto.icon, ":material/logout:")
+        logout.click().run(timeout=45)
 
         self.assertFalse(app.exception)
         self.assertFalse(app.radio)
@@ -91,6 +94,58 @@ class StreamlitDataEntryTests(unittest.TestCase):
         zone = next(item for item in saved["zones"] if item["id"] == "nyakach-north")
         self.assertEqual(zone["environment"]["rainfall7dMm"], 91.5)
         self.assertTrue(any("saved successfully" in message.value for message in app.success))
+
+    def test_ai_review_exposes_a_subcounty_pdf_download(self):
+        app = self._app_on_page("AI analyst")
+        dataset = core.load_seed_data()
+        app.session_state["ai_result"] = {
+            "review": {
+                "headline": "Elevated signal requires verification",
+                "overallRisk": "high",
+                "executiveSummary": "One zone needs rapid validation while response actions remain drafts.",
+                "keyFindings": [
+                    {
+                        "title": "Cases are rising",
+                        "evidence": "Nyakach North reports 68 latest-week cases.",
+                        "implication": "Verify facility reports before escalation.",
+                    }
+                ],
+                "priorities": [
+                    {
+                        "rank": 1,
+                        "action": "Verify reports",
+                        "owner": "Surveillance lead",
+                        "timeframe": "Within 4 hours",
+                        "rationale": "Confirm the aggregate signal.",
+                        "requiresApproval": False,
+                    }
+                ],
+                "dataQuality": {
+                    "freshness": "Current reporting week",
+                    "completeness": "94%",
+                    "concerns": ["Check late reports"],
+                },
+                "limitations": ["This signal is not an outbreak declaration."],
+            },
+            "model": "gemini-3.8-flash",
+            "responseId": "resp_test",
+            "generatedAt": "2026-10-15T09:00:00.000Z",
+            "sourceUpdatedAt": dataset["metadata"]["updatedAt"],
+            "scope": {
+                "type": "zone",
+                "id": "nyakach-north",
+                "label": "Nyakach North",
+                "subcounty": "Nyakach",
+            },
+        }
+        app.run(timeout=45)
+
+        self.assertFalse(app.exception)
+        downloads = app.get("download_button")
+        self.assertEqual(len(downloads), 1)
+        self.assertEqual(downloads[0].label, "Download AI report")
+        self.assertEqual(downloads[0].key, "download-ai-report")
+        self.assertTrue(any("Nyakach Sub-County letterhead" in caption.value for caption in app.caption))
 
 
 if __name__ == "__main__":
