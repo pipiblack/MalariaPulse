@@ -2,11 +2,12 @@
 
 MalariaPulse is a safety-gated, multi-agent malaria early-warning and response MVP for county health teams, clinics, and community health workers. It combines aggregated clinical trends, environmental signals, and inventory telemetry to surface micro-zone risk, draft resource plans, and prepare localized outreach.
 
-The repository contains three compatible surfaces backed by the same operational JSON data:
+The repository contains four compatible surfaces backed by the same operational JSON data:
 
 - a Streamlit operations dashboard for uploads, tabbed data entry, response review, and live AI analysis;
 - a legacy zero-dependency Node operations console;
-- an [Eve](https://eve.dev/docs) durable agent with three isolated specialists, a six-hour surveillance schedule, and human approval for operational release.
+- an [Eve](https://eve.dev/docs) durable agent with three isolated specialists, a six-hour surveillance schedule, and human approval for operational release;
+- an authenticated [Model Context Protocol (MCP)](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro) endpoint that lets compatible AI clients invoke the durable agent and approved MalariaPulse tools.
 
 ## What works now
 
@@ -22,6 +23,7 @@ The repository contains three compatible surfaces backed by the same operational
 - A live AI operations analyst backed by the Google Gemini API, with county-wide and micro-zone reviews, structured findings, ranked priorities, and explicit data-quality notes.
 - Downloadable PDF AI reports with the selected subcounty letterhead on the first page and clean continuation pages.
 - Eve subagents for surveillance, supply, and community action, plus a root orchestrator and recurring schedule.
+- A 2026-07-28-compatible MCP Streamable HTTP channel with durable-agent invocation, aggregate surveillance reads, and draft-only response generation.
 - An always-on human approval gate before stock or outreach authorization.
 - Node tests for scoring, planning, messaging, and orchestration.
 
@@ -46,6 +48,15 @@ Supply specialist   Community action specialist
              │
              ▼
    Future dispatch adapters (not connected)
+
+MCP-compatible AI clients
+             │ authenticated Streamable HTTP
+             ▼
+       /eve/v1/mcp
+             │
+             ├── durable agent_start / agent_get / agent_update / agent_cancel
+             ├── read_surveillance_snapshot (read-only aggregates)
+             └── draft_response_cycle (draft-only; no external action)
 ```
 
 The browser demo executes the same three stages deterministically so it remains evaluable without an LLM or external service. Eve adds durable sessions, specialist delegation, scheduled runs, and approval semantics.
@@ -163,6 +174,42 @@ Production schedules fire every six hours. During local Eve development, trigger
 curl -X POST http://localhost:2000/eve/v1/dev/schedules/surveillance_sweep
 ```
 
+## Connect through MCP
+
+MalariaPulse exposes an MCP Streamable HTTP endpoint through the Eve agent service:
+
+```text
+http://localhost:2000/eve/v1/mcp
+```
+
+Start the service with Node 24+:
+
+```bash
+nvm use
+npm install
+npm run dev:agent
+```
+
+In local Eve development, the endpoint uses Eve's development-only identity, which the production runtime rejects. For any deployed agent, set a separate MCP username and a long random password in the host's secret manager:
+
+```bash
+MCP_USERNAME=malariapulse-mcp
+MCP_PASSWORD=replace_with_a_long_random_password
+```
+
+Never reuse the Streamlit demo login or commit the MCP password. The server fails closed in production when MCP credentials are absent. Replace HTTP Basic with an OIDC/OAuth protected-resource configuration before connecting external organizations or production health data.
+
+The MCP server publishes:
+
+- `agent_start`, `agent_get`, `agent_update`, and `agent_cancel` for durable multi-agent work;
+- `read_surveillance_snapshot` for current aggregate network or micro-zone context;
+- `draft_response_cycle` for a non-persistent, draft-only response cycle;
+- `authorize_response`, which retains its human-approval requirement and has no dispatch adapter.
+
+The endpoint follows MCP's tool-discovery and tool-call conventions. It does not expose uploaded source files, patient-level records, Gemini credentials, or Streamlit session credentials. All operational outputs remain proposals until an authorized human reviews them.
+
+Streamlit Community Cloud runs the Streamlit process only; it does not start the Node/Eve MCP service beside it. Deploy the Eve service separately on a Node 24+ host, protect its public HTTPS endpoint, and configure the MCP client with the resulting `/eve/v1/mcp` URL. The Streamlit dashboard itself and its design are unchanged.
+
 ## Safety posture
 
 This MVP is not a medical device, outbreak declaration system, or autonomous dispatch system. The data are synthetic. The score has not been epidemiologically calibrated, and an alert is not a confirmed outbreak. Before field use:
@@ -180,11 +227,12 @@ The outreach language follows the prevention, prompt-testing, and care-seeking p
 
 ```text
 agent/                         Eve root orchestrator
+  channels/mcp.ts             Authenticated MCP Streamable HTTP endpoint
   subagents/surveillance/     Risk specialist and tool
   subagents/supply/           Inventory specialist and tool
   subagents/community_action/ Outreach specialist and tool
   schedules/                  Six-hour surveillance sweep
-  tools/                      Human approval gate
+  tools/                      MCP-safe reads/drafts and human approval gate
 data/seed.json                Synthetic county network
 public/                       Operations console UI
 malariapulse/                 Python domain and AI integration
