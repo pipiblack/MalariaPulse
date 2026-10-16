@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import hmac
 from datetime import datetime
 from typing import Any
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 from malariapulse.ai import AIAnalystError, create_ai_review, get_ai_status, get_setting
+from malariapulse.auth import (
+    REMEMBER_LIFETIME_SECONDS,
+    create_remember_token,
+    validate_remember_token,
+)
 from malariapulse.core import (
     RESOURCE_LABELS,
     apply_data_import,
@@ -35,6 +42,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+REMEMBER_COOKIE_NAME = "malariapulse_remember"
+REMEMBER_QUERY_PARAM = "_mp_remember"
+FORGET_QUERY_PARAM = "_mp_forget"
+LOGOUT_QUERY_PARAM = "_mp_logout"
+
 st.markdown(
     """
     <style>
@@ -55,7 +67,7 @@ st.markdown(
     [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.14); }
     .mp-brand { font-size: 1.35rem; font-weight: 760; letter-spacing: -.03em; margin-bottom: .1rem; }
     .mp-brand span { color: #6ea1ff; }
-    .mp-side-label { color: #75849b; font-size: .67rem; font-weight: 800; text-transform: uppercase; letter-spacing: .11em; margin: 1.25rem 0 .5rem; }
+    .mp-side-label { color: #9fb0c8; font-size: .67rem; font-weight: 800; text-transform: uppercase; letter-spacing: .11em; margin: 1.25rem 0 .5rem; }
     .mp-header { padding: .35rem 0 .9rem; border-bottom: 1px solid var(--mp-border); margin-bottom: 1rem; }
     .mp-title { font-size: 2rem; font-weight: 760; letter-spacing: -.045em; line-height: 1.05; margin: 0; }
     .mp-subtitle { color: var(--mp-muted); margin: .4rem 0 0; font-size: .95rem; }
@@ -103,11 +115,40 @@ st.markdown(
       outline: 3px solid rgba(255,255,255,.82) !important;
       outline-offset: 2px;
     }
-    [data-testid="stSidebar"] .st-key-logout button p,
-    [data-testid="stSidebar"] .st-key-logout button span {
+    [data-testid="stSidebar"] .st-key-logout button p {
       color: #fff !important;
       font-weight: 800 !important;
     }
+    [data-testid="stExpander"] summary [data-testid="stIconMaterial"] {
+      display: none !important;
+    }
+    [data-testid="stExpander"] details > summary {
+      position: relative;
+      padding-left: 2rem;
+    }
+    [data-testid="stExpander"] details > summary::before {
+      content: "›";
+      position: absolute;
+      left: .72rem;
+      top: 50%;
+      color: var(--mp-muted);
+      font-family: Arial, sans-serif;
+      font-size: 1.35rem;
+      font-weight: 700;
+      line-height: 1;
+      transform: translateY(-50%);
+      transition: transform .16s ease;
+    }
+    [data-testid="stExpander"] details[open] > summary::before {
+      transform: translateY(-50%) rotate(90deg);
+    }
+    [data-testid="stExpander"] summary p {
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    [data-testid="stDataFrame"] { overflow: hidden; }
+    [data-testid="stDataFrame"] * { text-rendering: optimizeLegibility; }
+    .mp-login-options { margin-top: -.25rem; }
     @media (max-width: 800px) { .mp-title { font-size: 1.55rem; } }
     </style>
     """,
@@ -143,8 +184,56 @@ def _authentication_config() -> tuple[str, str, bool]:
     )
 
 
-def _render_login() -> None:
-    configured_username, configured_password, credentials_overridden = _authentication_config()
+def _query_param(name: str) -> str | None:
+    value = st.query_params.get(name)
+    if isinstance(value, list):
+        return str(value[0]) if value else None
+    return str(value) if value else None
+
+
+def _remember_secret(configured_password: str) -> str:
+    return _secret("REMEMBER_ME_SECRET") or get_setting("REMEMBER_ME_SECRET") or f"malariapulse-demo:{configured_password}"
+
+
+def _render_remember_cookie_bridge(*, token: str | None = None, clear: bool = False, reload_after: bool = False) -> None:
+    """Set or clear the signed browser token without storing the password."""
+    cookie_name = json.dumps(REMEMBER_COOKIE_NAME)
+    token_value = json.dumps(token or "")
+    query_names = json.dumps([REMEMBER_QUERY_PARAM, FORGET_QUERY_PARAM, LOGOUT_QUERY_PARAM])
+    max_age = REMEMBER_LIFETIME_SECONDS
+    st.html(
+        f"""
+        <script>
+        (() => {{
+          const parentWindow = window;
+          const cookieName = {cookie_name};
+          const token = {token_value};
+          const secure = parentWindow.location.protocol === "https:" ? "; Secure" : "";
+          if ({str(clear).lower()}) {{
+            parentWindow.document.cookie = `${{cookieName}}=; Max-Age=0; Path=/; SameSite=Lax${{secure}}`;
+          }} else if (token) {{
+            parentWindow.document.cookie = `${{cookieName}}=${{encodeURIComponent(token)}}; Max-Age={max_age}; Path=/; SameSite=Lax${{secure}}`;
+          }}
+          const url = new URL(parentWindow.location.href);
+          for (const name of {query_names}) url.searchParams.delete(name);
+          if ({str(reload_after).lower()}) {{
+            parentWindow.location.replace(url.toString());
+          }} else {{
+            parentWindow.history.replaceState({{}}, "", url.toString());
+          }}
+        }})();
+        </script>
+        """,
+        unsafe_allow_javascript=True,
+    )
+
+
+def _render_login(
+    configured_username: str,
+    configured_password: str,
+    credentials_overridden: bool,
+    remember_secret: str,
+) -> None:
     st.markdown(
         """
         <style>
@@ -165,28 +254,41 @@ def _render_login() -> None:
         with st.container(border=True):
             st.subheader("Sign in")
             st.caption("Enter your credentials to continue.")
-            with st.form("login-form"):
-                username = st.text_input(
-                    "Email or username",
-                    placeholder="name@county-health.example",
-                    key="login-username",
-                )
-                password = st.text_input(
-                    "Password",
-                    type="password",
-                    placeholder="Enter your password",
-                    key="login-password",
-                )
-                submitted = st.form_submit_button("Sign in", type="primary", width="stretch")
-                if submitted:
-                    username_matches = hmac.compare_digest(username.strip(), configured_username)
-                    password_matches = hmac.compare_digest(password, configured_password)
-                    if username_matches and password_matches:
-                        st.session_state["authenticated"] = True
-                        st.session_state["authenticated_user"] = configured_username
-                        st.rerun()
+            show_password = bool(st.session_state.get("login-show-password", False))
+            username = st.text_input(
+                "Email or username",
+                placeholder="name@county-health.example",
+                key="login-username",
+            )
+            password = st.text_input(
+                "Password",
+                type="default" if show_password else "password",
+                placeholder="Enter your password",
+                key="login-password",
+            )
+            remember_login = st.checkbox(
+                "Remember me for 14 days",
+                key="login-remember",
+            )
+            st.checkbox("Show password", key="login-show-password")
+            st.caption("Leave Remember me unchecked on a shared device.")
+            submitted = st.button("Sign in", type="primary", width="stretch", key="login-submit")
+            if submitted:
+                username_matches = hmac.compare_digest(username.strip(), configured_username)
+                password_matches = hmac.compare_digest(password, configured_password)
+                if username_matches and password_matches:
+                    st.session_state["authenticated"] = True
+                    st.session_state["authenticated_user"] = configured_username
+                    if remember_login:
+                        st.query_params[REMEMBER_QUERY_PARAM] = create_remember_token(
+                            configured_username,
+                            remember_secret,
+                        )
                     else:
-                        st.error("The username or password is incorrect. Check the demo credentials and try again.")
+                        st.query_params[FORGET_QUERY_PARAM] = "1"
+                    st.rerun()
+                else:
+                    st.error("The username or password is incorrect. Check the demo credentials and try again.")
 
         if credentials_overridden:
             st.caption("Login credentials are configured by the server.")
@@ -206,6 +308,92 @@ def _clinic_names(dataset: dict[str, Any]) -> dict[str, str]:
 def _risk_chip(level: str) -> str:
     safe_level = level if level in {"low", "watch", "high", "critical"} else "watch"
     return f'<span class="mp-chip mp-chip-{safe_level}">{safe_level}</span>'
+
+
+def _horizontal_bar_chart(
+    frame: pd.DataFrame,
+    *,
+    category: str,
+    value: str,
+    color: str,
+    value_title: str,
+    height_per_row: int = 34,
+    label_limit: int = 260,
+) -> alt.Chart:
+    return (
+        alt.Chart(frame)
+        .mark_bar(color=color, cornerRadiusEnd=4)
+        .encode(
+            x=alt.X(
+                f"{value}:Q",
+                title=value_title,
+                scale=alt.Scale(zero=True),
+                axis=alt.Axis(labelColor="#526179", titleColor="#526179", labelFontSize=12, titleFontSize=12),
+            ),
+            y=alt.Y(
+                f"{category}:N",
+                title=None,
+                sort=alt.SortField(field=value, order="ascending"),
+                axis=alt.Axis(labelColor="#526179", labelFontSize=12, labelLimit=label_limit),
+            ),
+            tooltip=[
+                alt.Tooltip(f"{category}:N", title=category),
+                alt.Tooltip(f"{value}:Q", title=value_title, format=".1f"),
+            ],
+        )
+        .properties(height=max(220, len(frame) * height_per_row))
+        .configure_axis(gridColor="#e5e9ef", domainColor="#cbd3df", tickColor="#cbd3df")
+        .configure_view(strokeWidth=0)
+    )
+
+
+def _case_trend_chart(frame: pd.DataFrame, *, series_names: list[str], height: int = 310) -> alt.Chart:
+    week_order = ["W-5", "W-4", "W-3", "W-2", "W-1", "Current"]
+    long_frame = frame.reset_index(names="Week").melt(
+        id_vars="Week",
+        value_vars=series_names,
+        var_name="Micro-zone",
+        value_name="Case count",
+    )
+    palette = ["#246bfd", "#62b5ff", "#e6534c", "#ff9f9a", "#18a58a", "#76d99a"]
+    return (
+        alt.Chart(long_frame)
+        .mark_line(point=alt.OverlayMarkDef(size=42, filled=True), strokeWidth=2.2)
+        .encode(
+            x=alt.X(
+                "Week:N",
+                sort=week_order,
+                title=None,
+                axis=alt.Axis(labelAngle=0, labelColor="#526179", labelFontSize=12),
+            ),
+            y=alt.Y(
+                "Case count:Q",
+                title="Reported cases",
+                scale=alt.Scale(zero=True),
+                axis=alt.Axis(labelColor="#526179", titleColor="#526179", labelFontSize=12, titleFontSize=12),
+            ),
+            color=alt.Color(
+                "Micro-zone:N",
+                scale=alt.Scale(domain=series_names, range=palette[: len(series_names)]),
+                legend=alt.Legend(
+                    title=None,
+                    orient="bottom",
+                    columns=3,
+                    labelColor="#526179",
+                    labelFontSize=11,
+                    labelLimit=180,
+                ) if len(series_names) > 1 else None,
+            ),
+            tooltip=[
+                alt.Tooltip("Week:N"),
+                alt.Tooltip("Micro-zone:N"),
+                alt.Tooltip("Case count:Q", format=".0f", title="Reported cases"),
+            ],
+        )
+        .properties(height=height)
+        .configure_axis(gridColor="#e5e9ef", domainColor="#cbd3df", tickColor="#cbd3df")
+        .configure_view(strokeWidth=0)
+    )
 
 
 def _set_flash(page: str, message: str) -> None:
@@ -446,7 +634,6 @@ def _render_ai_review(result: dict[str, Any], dataset: dict[str, Any]) -> None:
                 file_name=ai_report_filename(result, dataset),
                 mime="application/pdf",
                 type="primary",
-                icon=":material/download:",
                 width="stretch",
                 key="download-ai-report",
             )
@@ -492,8 +679,32 @@ def _render_ai_review(result: dict[str, Any], dataset: dict[str, Any]) -> None:
     )
 
 
+configured_username, configured_password, credentials_overridden = _authentication_config()
+remember_secret = _remember_secret(configured_password)
+logout_requested = _query_param(LOGOUT_QUERY_PARAM) == "1"
+remember_query_token = _query_param(REMEMBER_QUERY_PARAM)
+forget_requested = _query_param(FORGET_QUERY_PARAM) == "1"
+
+if logout_requested:
+    st.session_state.clear()
+    _render_remember_cookie_bridge(clear=True, reload_after=True)
+elif remember_query_token:
+    if validate_remember_token(remember_query_token, configured_username, remember_secret):
+        st.session_state["authenticated"] = True
+        st.session_state["authenticated_user"] = configured_username
+        _render_remember_cookie_bridge(token=remember_query_token)
+    else:
+        del st.query_params[REMEMBER_QUERY_PARAM]
+elif forget_requested:
+    _render_remember_cookie_bridge(clear=True)
+elif not st.session_state.get("authenticated", False):
+    remembered_token = st.context.cookies.get(REMEMBER_COOKIE_NAME)
+    if validate_remember_token(remembered_token, configured_username, remember_secret):
+        st.session_state["authenticated"] = True
+        st.session_state["authenticated_user"] = configured_username
+
 if not st.session_state.get("authenticated", False):
-    _render_login()
+    _render_login(configured_username, configured_password, credentials_overridden, remember_secret)
     st.stop()
 
 
@@ -520,8 +731,9 @@ with st.sidebar:
     st.caption("County early warning & response")
     st.markdown('<div class="mp-side-label">Signed in</div>', unsafe_allow_html=True)
     st.caption(st.session_state.get("authenticated_user", "Demo operator"))
-    if st.button("Log out", key="logout", type="primary", icon=":material/logout:", width="stretch"):
+    if st.button("Log out", key="logout", type="primary", width="stretch"):
         st.session_state.clear()
+        st.query_params[LOGOUT_QUERY_PARAM] = "1"
         st.rerun()
     st.markdown('<div class="mp-side-label">Workspace</div>', unsafe_allow_html=True)
     active_page = st.radio(
@@ -612,16 +824,30 @@ if active_page == "Overview":
     )
     trend_col, rank_col = st.columns([3, 2])
     with trend_col:
-        st.line_chart(county_trend, height=310)
+        st.altair_chart(
+            _case_trend_chart(county_trend, series_names=list(county_trend.columns), height=310),
+            width="stretch",
+        )
         st.caption("Six-week reported case trajectories. Compare direction and persistence, not only the latest total.")
     with rank_col:
         risk_rank = pd.DataFrame(
             {
-                "Micro-zone": [item["zoneName"] for item in reversed(snapshot["assessments"])],
-                "Risk score": [item["score"] for item in reversed(snapshot["assessments"])],
+                "Micro-zone": [item["zoneName"] for item in snapshot["assessments"]],
+                "Risk score": [item["score"] for item in snapshot["assessments"]],
             }
-        ).set_index("Micro-zone")
-        st.bar_chart(risk_rank, horizontal=True, color="#246bfd", height=310)
+        )
+        st.altair_chart(
+            _horizontal_bar_chart(
+                risk_rank,
+                category="Micro-zone",
+                value="Risk score",
+                color="#246bfd",
+                value_title="Risk score (0–100)",
+                height_per_row=42,
+                label_limit=190,
+            ),
+            width="stretch",
+        )
         st.caption("Operational score from 0–100. Scores at or above 60 enter the high/critical response queue.")
 
     selected_zone = next(zone for zone in dataset["zones"] if zone["id"] == selected_zone_id)
@@ -635,7 +861,10 @@ if active_page == "Overview":
                 "Reported cases": selected_zone["weeklyCases"],
             }
         ).set_index("Week")
-        st.line_chart(trend, color="#246bfd")
+        st.altair_chart(
+            _case_trend_chart(trend, series_names=["Reported cases"], height=300),
+            width="stretch",
+        )
         st.caption(
             f"{selected_zone['tests']} tests · {selected_zone['positiveTests']} positive · "
             f"{assessment['positivityPct']}% positivity · {assessment['testingCoveragePct']}% of suspected cases tested · "
@@ -721,8 +950,19 @@ if active_page == "Overview":
                 "Micro-zone": [zone["name"] for zone in dataset["zones"]],
                 "30-day rainfall (mm)": [zone["environment"]["rainfall30dMm"] for zone in dataset["zones"]],
             }
-        ).set_index("Micro-zone")
-        st.bar_chart(climate_chart, color="#246bfd", height=300)
+        )
+        st.altair_chart(
+            _horizontal_bar_chart(
+                climate_chart,
+                category="Micro-zone",
+                value="30-day rainfall (mm)",
+                color="#246bfd",
+                value_title="Rainfall (mm)",
+                height_per_row=42,
+                label_limit=190,
+            ),
+            width="stretch",
+        )
         climate_rows = pd.DataFrame(
             [
                 {
@@ -747,11 +987,54 @@ if active_page == "Overview":
                 "Larval sites managed": [zone["interventions"]["larvalSitesManagedPct"] for zone in dataset["zones"]],
             }
         ).set_index("Micro-zone")
-        st.bar_chart(
-            prevention_chart,
-            color=["#246bfd", "#14865f", "#e49b24", "#647188"],
-            height=300,
+        prevention_long = prevention_chart.reset_index().melt(
+            id_vars="Micro-zone",
+            var_name="Indicator",
+            value_name="Coverage",
         )
+        prevention_plot = (
+            alt.Chart(prevention_long)
+            .mark_bar(cornerRadiusEnd=3)
+            .encode(
+                x=alt.X(
+                    "Coverage:Q",
+                    title="Coverage (%)",
+                    scale=alt.Scale(domain=[0, 100]),
+                    axis=alt.Axis(labelColor="#526179", titleColor="#526179", labelFontSize=12, titleFontSize=12),
+                ),
+                y=alt.Y(
+                    "Micro-zone:N",
+                    title=None,
+                    sort=alt.EncodingSortField(field="Coverage", op="mean", order="descending"),
+                    axis=alt.Axis(labelColor="#526179", labelFontSize=12, labelLimit=190),
+                ),
+                yOffset="Indicator:N",
+                color=alt.Color(
+                    "Indicator:N",
+                    scale=alt.Scale(
+                        domain=["LLIN use", "IPTp3", "Vaccine dose 4", "Larval sites managed"],
+                        range=["#246bfd", "#14865f", "#e49b24", "#647188"],
+                    ),
+                    legend=alt.Legend(
+                        title=None,
+                        orient="bottom",
+                        columns=2,
+                        labelColor="#526179",
+                        labelFontSize=11,
+                        labelLimit=180,
+                    ),
+                ),
+                tooltip=[
+                    alt.Tooltip("Micro-zone:N"),
+                    alt.Tooltip("Indicator:N"),
+                    alt.Tooltip("Coverage:Q", format=".1f", title="Coverage (%)"),
+                ],
+            )
+            .properties(height=300)
+            .configure_axis(gridColor="#e5e9ef", domainColor="#cbd3df", tickColor="#cbd3df")
+            .configure_view(strokeWidth=0)
+        )
+        st.altair_chart(prevention_plot, width="stretch")
         st.dataframe(
             prevention_chart.reset_index(),
             hide_index=True,
@@ -783,8 +1066,19 @@ if active_page == "Overview":
             }
         )
     supply_frame = pd.DataFrame(supply_rows).sort_values("Lowest coverage")
-    supply_chart = supply_frame[["Facility", "Lowest coverage"]].set_index("Facility")
-    st.bar_chart(supply_chart, horizontal=True, color="#e6534c", height=320)
+    supply_chart = supply_frame[["Facility", "Lowest coverage"]]
+    st.altair_chart(
+        _horizontal_bar_chart(
+            supply_chart,
+            category="Facility",
+            value="Lowest coverage",
+            color="#e6534c",
+            value_title="Lowest commodity coverage (weeks)",
+            height_per_row=36,
+            label_limit=420,
+        ),
+        width="stretch",
+    )
     st.dataframe(
         supply_frame,
         hide_index=True,

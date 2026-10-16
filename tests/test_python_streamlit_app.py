@@ -56,11 +56,24 @@ class StreamlitDataEntryTests(unittest.TestCase):
         self.assertFalse(app.radio)
         self.assertTrue(any("incorrect" in message.value for message in app.error))
 
+    def test_login_exposes_remember_me_and_password_visibility(self):
+        app = self._new_app()
+        self.assertFalse(app.checkbox(key="login-remember").value)
+        self.assertFalse(app.checkbox(key="login-show-password").value)
+        self.assertEqual(app.text_input(key="login-password").proto.type, 1)
+
+        app.text_input(key="login-password").set_value("DemoPulse!2026")
+        app.checkbox(key="login-show-password").check().run(timeout=45)
+
+        self.assertFalse(app.exception)
+        self.assertEqual(app.text_input(key="login-password").proto.type, 0)
+        self.assertEqual(app.text_input(key="login-password").value, "DemoPulse!2026")
+
     def test_logout_clears_the_authenticated_session(self):
         app = self._login(self._new_app())
         logout = app.button(key="logout")
         self.assertEqual(logout.proto.type, "primary")
-        self.assertEqual(logout.proto.icon, ":material/logout:")
+        self.assertEqual(logout.proto.icon, "")
         logout.click().run(timeout=45)
 
         self.assertFalse(app.exception)

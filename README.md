@@ -76,7 +76,7 @@ python3 -m streamlit run streamlit_app.py
 
 Open `http://localhost:8501`. The Streamlit sidebar provides the full workflow: overview and agent response cycles, validated bulk upload, single-zone clinical and environmental corrections, facility supply entry, and live AI reviews. Every micro-zone field is a dropdown populated from the current dataset.
 
-Use these sample credentials for the local demo:
+Use these sample credentials for the local demo. The login also provides **Show password** and an optional **Remember me** setting for faster return visits:
 
 ```text
 Username: admin@malariapulse.demo
@@ -88,7 +88,10 @@ These defaults are for demonstration only. Override both values in `.env.local` 
 ```bash
 DEMO_USERNAME=your_demo_username
 DEMO_PASSWORD=use_a_new_strong_password
+REMEMBER_ME_SECRET=use_a_separate_long_random_value
 ```
+
+Remember-me sessions last 14 days and store only a signed, expiring browser token—not the password. Leave the option unchecked on a shared device. Logging out clears the remembered browser session. This remains demonstration authentication; replace it with managed identity and server-side session revocation before production use.
 
 The dashboard and existing Node/Eve implementation read and write the same ignored `data/operational.json` file, so data entered through either interface remains available to the others. Uploaded CSV, TSV, TXT, JSON, XLSX, and HTML/HTM files are limited to 1,000 aggregate rows and 2 MB. TXT files may use comma, tab, semicolon, or pipe delimiters. Excel imports use the first sheet and HTML imports use the first table. One invalid row blocks the entire import.
 
