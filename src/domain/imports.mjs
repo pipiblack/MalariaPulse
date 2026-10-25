@@ -1,4 +1,4 @@
-const MAX_ROWS = 1_000;
+const MAX_IMPORT_BYTES = 15 * 1024 * 1024;
 
 export const IMPORT_SCHEMAS = {
   clinical: {
@@ -193,9 +193,9 @@ export function parseDataImport({ kind, filename, content, dataset }) {
   const schema = IMPORT_SCHEMAS[kind];
   if (!schema) throw new Error("Import type must be clinical, environment, or supply.");
   if (typeof content !== "string" || !content.trim()) throw new Error("Choose a non-empty file to upload.");
+  if (new TextEncoder().encode(content).length > MAX_IMPORT_BYTES) throw new Error("Upload files must be 15 MB or smaller.");
   const format = formatFromFilename(filename);
   const parsed = format === "json" ? parseJson(content) : parseDelimited(content, format === "tsv" ? "\t" : ",");
-  if (parsed.records.length > MAX_ROWS) throw new Error(`A single import can contain at most ${MAX_ROWS} rows.`);
 
   const fileErrors = [];
   if (parsed.records.length === 0) fileErrors.push("The file does not contain any data rows.");

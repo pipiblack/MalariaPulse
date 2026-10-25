@@ -8,7 +8,7 @@ from unittest.mock import patch
 from openpyxl import Workbook
 
 import malariapulse.core as core
-from malariapulse.ai import create_ai_review
+from malariapulse.ai import AIAnalystError, create_ai_review
 from malariapulse.core import (
     apply_parsed_import,
     assess_zone,
@@ -119,6 +119,28 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(preview["canApply"])
         self.assertEqual(preview["normalizedRows"][0]["temperatureC"], 27.2)
 
+    def test_imports_have_no_configured_row_count_limit(self):
+        dataset = load_seed_data()
+        source_zone = dataset["zones"][0]
+        dataset["zones"] = []
+        rows = ["zone_id,rainfall_7d_mm,temperature_c,humidity_pct"]
+        for index in range(1_005):
+            zone = json.loads(json.dumps(source_zone))
+            zone["id"] = f"zone-{index}"
+            zone["name"] = f"Zone {index}"
+            dataset["zones"].append(zone)
+            rows.append(f"zone-{index},61.5,27.2,68")
+
+        preview = parse_data_import("environment", "environment.csv", "\n".join(rows).encode(), dataset)
+
+        self.assertTrue(preview["canApply"])
+        self.assertEqual(preview["validCount"], 1_005)
+
+    def test_imports_reject_files_larger_than_15_mb(self):
+        oversized = b"x" * (15 * 1024 * 1024 + 1)
+        with self.assertRaisesRegex(ValueError, "15 MB or smaller"):
+            parse_data_import("environment", "environment.csv", oversized, load_seed_data())
+
     def test_intervention_csv_updates_zone_coverage_context(self):
         dataset = load_seed_data()
         content = (
@@ -227,12 +249,69 @@ class CoreTests(unittest.TestCase):
         )
         self.assertEqual(captured["payload"]["generationConfig"]["responseMimeType"], "application/json")
         self.assertEqual(captured["payload"]["generationConfig"]["responseJsonSchema"]["type"], "object")
+        self.assertEqual(captured["payload"]["generationConfig"]["maxOutputTokens"], 8_000)
         self.assertIn('"currentCases":99', captured["payload"]["contents"][0]["parts"][0]["text"])
         self.assertIn('"severeCases":7', captured["payload"]["contents"][0]["parts"][0]["text"])
         self.assertIn('"llinUsePct":71', captured["payload"]["contents"][0]["parts"][0]["text"])
         self.assertIn("senior public-health operations analyst", captured["payload"]["systemInstruction"]["parts"][0]["text"])
         self.assertEqual(result["review"]["headline"], SAMPLE_REVIEW["headline"])
         self.assertEqual(result["responseId"], "resp_test")
+
+    def test_ai_accepts_json_inside_a_markdown_fence(self):
+        def fake_request(payload, api_key):
+            return {
+                "responseId": "resp_fenced",
+                "candidates": [
+                    {"finishReason": "STOP", "content": {"parts": [{"text": f"```json\n{json.dumps(SAMPLE_REVIEW)}\n```"}]}}
+                ],
+            }
+
+        result = create_ai_review(
+            load_seed_data(),
+            api_key="gemini-test-key-not-a-real-secret-12345",
+            request_fn=fake_request,
+        )
+
+        self.assertEqual(result["review"]["headline"], SAMPLE_REVIEW["headline"])
+
+    def test_ai_retries_one_malformed_structured_response(self):
+        calls = []
+
+        def fake_request(payload, api_key):
+            calls.append(payload)
+            if len(calls) == 1:
+                return {
+                    "responseId": "resp_truncated",
+                    "candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": '{"headline":"Cut off"'}]}}],
+                }
+            return {
+                "responseId": "resp_retry",
+                "candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": json.dumps(SAMPLE_REVIEW)}]}}],
+            }
+
+        result = create_ai_review(
+            load_seed_data(),
+            api_key="gemini-test-key-not-a-real-secret-12345",
+            request_fn=fake_request,
+        )
+
+        self.assertEqual(len(calls), 2)
+        self.assertIn("previous attempt was not valid JSON", calls[1]["contents"][0]["parts"][0]["text"])
+        self.assertEqual(result["responseId"], "resp_retry")
+
+    def test_ai_reports_repeated_truncation_clearly(self):
+        def fake_request(payload, api_key):
+            return {
+                "responseId": "resp_truncated",
+                "candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": '{"headline":"Cut off"'}]}}],
+            }
+
+        with self.assertRaisesRegex(AIAnalystError, "stopped before completing"):
+            create_ai_review(
+                load_seed_data(),
+                api_key="gemini-test-key-not-a-real-secret-12345",
+                request_fn=fake_request,
+            )
 
     def test_ai_review_pdf_uses_the_selected_subcounty_letterhead(self):
         dataset = load_seed_data()

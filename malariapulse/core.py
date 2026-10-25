@@ -20,8 +20,7 @@ OPERATIONAL_PATH = ROOT / "data" / "operational.json"
 RUNTIME_PATH = ROOT / "data" / "runtime.json"
 
 RESOURCE_LABELS = {"rdt": "RDT kits", "act": "ACT courses", "nets": "treated nets"}
-MAX_IMPORT_ROWS = 1_000
-MAX_IMPORT_BYTES = 2 * 1024 * 1024
+MAX_IMPORT_BYTES = 15 * 1024 * 1024
 
 IMPORT_SCHEMAS = {
     "clinical": {
@@ -910,7 +909,7 @@ def _records_from_rows(raw_rows: list[tuple[int, list[Any]]]) -> tuple[list[str]
 
 def _parse_uploaded(filename: str, content: bytes) -> tuple[str, list[str], list[dict[str, Any]]]:
     if len(content) > MAX_IMPORT_BYTES:
-        raise ValueError("Upload files must be 2 MB or smaller.")
+        raise ValueError("Upload files must be 15 MB or smaller.")
     extension = Path(filename).suffix.lower().lstrip(".")
     supported = {"csv", "tsv", "txt", "json", "xlsx", "html", "htm"}
     if extension not in supported:
@@ -931,8 +930,6 @@ def _parse_uploaded(filename: str, content: bytes) -> tuple[str, list[str], list
                     cells.pop()
                 if any(cell is not None and str(cell).strip() for cell in cells):
                     raw_rows.append((row_number, cells))
-                if len(raw_rows) > MAX_IMPORT_ROWS + 1:
-                    break
             workbook.close()
         except Exception as error:
             raise ValueError("The Excel workbook could not be read. Upload a valid .xlsx file.") from error
@@ -1145,8 +1142,6 @@ def parse_data_import(kind: str, filename: str, content: bytes, dataset: dict[st
         raise ValueError("Import type must be clinical, environment, intervention, or supply.")
     dataset = dataset or load_dataset()
     file_format, columns, records = _parse_uploaded(filename, content)
-    if len(records) > MAX_IMPORT_ROWS:
-        raise ValueError(f"A single import can contain at most {MAX_IMPORT_ROWS} rows.")
     schema = IMPORT_SCHEMAS[kind]
     file_errors: list[str] = []
     if not records:

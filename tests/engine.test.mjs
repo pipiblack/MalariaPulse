@@ -177,6 +177,34 @@ test("environment JSON imports accept a rows wrapper", () => {
   assert.deepEqual(updated.zones.find((zone) => zone.id === "kisumu-west").environment, { rainfall7dMm: 61.5, temperatureC: 27.2, humidityPct: 68 });
 });
 
+test("imports have no configured row count limit", () => {
+  const dataset = loadSeedData();
+  const sourceZone = dataset.zones[0];
+  dataset.zones = Array.from({ length: 1_005 }, (_, index) => ({
+    ...structuredClone(sourceZone),
+    id: `zone-${index}`,
+    name: `Zone ${index}`
+  }));
+  const content = [
+    "zone_id,rainfall_7d_mm,temperature_c,humidity_pct",
+    ...dataset.zones.map((zone) => `${zone.id},61.5,27.2,68`)
+  ].join("\n");
+
+  const result = parseDataImport({ kind: "environment", filename: "environment.csv", content, dataset });
+
+  assert.equal(result.canApply, true);
+  assert.equal(result.validCount, 1_005);
+});
+
+test("imports reject files larger than 15 MB", () => {
+  const dataset = loadSeedData();
+  const content = "x".repeat(15 * 1024 * 1024 + 1);
+  assert.throws(
+    () => parseDataImport({ kind: "environment", filename: "environment.csv", content, dataset }),
+    /15 MB or smaller/
+  );
+});
+
 test("supply imports accept tab-separated files", () => {
   const dataset = loadSeedData();
   const content = [

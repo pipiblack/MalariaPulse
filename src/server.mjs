@@ -19,6 +19,7 @@ import {
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const PUBLIC_DIR = resolve(ROOT, "public");
 const PORT = config.port;
+const MAX_JSON_REQUEST_BYTES = 64 * 1024 * 1024;
 const CONTENT_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -37,7 +38,7 @@ async function readJson(request) {
   let bytes = 0;
   for await (const chunk of request) {
     bytes += chunk.length;
-    if (bytes > 4_500_000) throw new Error("Request body is too large. Keep upload files below 2 MB.");
+    if (bytes > MAX_JSON_REQUEST_BYTES) throw new Error("Request body is too large. Keep upload files at or below 15 MB.");
     chunks.push(chunk);
   }
   if (chunks.length === 0) return {};

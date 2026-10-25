@@ -120,9 +120,12 @@ export function updateSupplyData(clinicId, input) {
 export function previewDataImport(input) {
   const result = parseDataImport({ ...input, dataset: loadDataset() });
   const { normalizedRows, ...preview } = result;
+  const previewRowLimit = 200;
   return {
     ...preview,
-    rows: preview.rows.map(({ normalized, ...row }) => row)
+    rows: preview.rows.slice(0, previewRowLimit).map(({ normalized, ...row }) => row),
+    previewRowLimit,
+    previewTruncated: preview.rowCount > previewRowLimit
   };
 }
 

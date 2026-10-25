@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
+from malariapulse.auth import create_remember_token
 import malariapulse.core as core
 
 
@@ -79,6 +80,20 @@ class StreamlitDataEntryTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertFalse(app.radio)
         self.assertEqual(app.text_input(key="login-username").value, "")
+
+    def test_forget_request_wins_over_stale_remember_token_and_cleans_url(self):
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(str(app_path))
+        app.query_params["_mp_remember"] = create_remember_token(
+            "admin@malariapulse.demo",
+            "malariapulse-demo:DemoPulse!2026",
+        )
+        app.query_params["_mp_forget"] = "1"
+        app.run(timeout=45)
+
+        self.assertFalse(app.exception)
+        self.assertFalse(app.radio)
+        self.assertEqual(app.query_params, {})
 
     def test_overview_exposes_clear_operational_sections(self):
         app = self._login(self._new_app())

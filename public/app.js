@@ -1,5 +1,6 @@
 const state = { dashboard: null, dataset: null, aiStatus: null, selectedCycle: null, importFile: null, importPreview: null };
 const $ = (selector) => document.querySelector(selector);
+const MAX_IMPORT_BYTES = 15 * 1024 * 1024;
 
 const tones = { critical: "#ca3d3a", high: "#e9665d", watch: "#dc9b2f", low: "#3e9b75" };
 const positions = {
@@ -203,12 +204,12 @@ async function selectImportFile(file) {
     toast("Choose a CSV, TSV, or JSON file");
     return;
   }
-  if (file.size > 2_000_000) {
+  if (file.size > MAX_IMPORT_BYTES) {
     state.importFile = null;
     $("#import-file").value = "";
-    $("#import-file-detail").textContent = "File exceeds 2 MB";
+    $("#import-file-detail").textContent = "File exceeds 15 MB";
     $("#preview-import").disabled = true;
-    toast("Keep each upload below 2 MB");
+    toast("Keep each upload at or below 15 MB");
     return;
   }
   const content = await file.text();
@@ -232,6 +233,13 @@ function renderImportPreview(preview) {
   issues.hidden = messages.length === 0;
   issues.innerHTML = messages.map((item) => `<p class="${item.tone}">${escapeHtml(item.message)}</p>`).join("");
   $("#import-preview-rows").innerHTML = preview.rows.map((row) => `<tr><td>${row.rowNumber}</td><td><strong>${escapeHtml(row.identifier || "—")}</strong></td><td>${escapeHtml(row.preview)}</td><td><span class="row-validation ${row.valid ? "valid" : "invalid"}">${row.valid ? "Valid" : escapeHtml(row.errors.join(" "))}</span></td></tr>`).join("") || '<tr><td colspan="4" class="empty-table">No data rows found.</td></tr>';
+  if (preview.previewTruncated) {
+    $("#import-issues").hidden = false;
+    $("#import-issues").insertAdjacentHTML(
+      "beforeend",
+      `<p class="warning">Showing the first ${preview.previewRowLimit.toLocaleString()} rows. All ${preview.rowCount.toLocaleString()} rows were validated.</p>`
+    );
+  }
   $("#apply-import").disabled = !preview.canApply;
   $("#import-results").scrollIntoView({ behavior: "smooth", block: "start" });
 }

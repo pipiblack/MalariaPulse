@@ -14,6 +14,7 @@ from .core import ROOT, assess_zone, build_network_snapshot, draft_advisories, p
 
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_MODEL = "gemini-3.8-flash"
+MAX_REVIEW_OUTPUT_TOKENS = 8_000
 
 ANALYST_INSTRUCTIONS = """You are the MalariaPulse senior public-health operations analyst for a county response team.
 
@@ -236,6 +237,51 @@ def _extract_output_text(response: dict[str, Any]) -> str:
     return "\n".join(parts).strip()
 
 
+def _finish_reason(response: dict[str, Any]) -> str | None:
+    candidates = response.get("candidates") or []
+    if not candidates or not isinstance(candidates[0], dict):
+        return None
+    reason = candidates[0].get("finishReason")
+    return str(reason) if reason else None
+
+
+def _parse_review_json(output_text: str) -> Any:
+    """Decode structured output while tolerating an accidental Markdown fence."""
+    candidate = output_text.strip()
+    attempts = [candidate]
+    if candidate.startswith("```") and candidate.endswith("```"):
+        lines = candidate.splitlines()
+        if len(lines) >= 3:
+            attempts.append("\n".join(lines[1:-1]).strip())
+
+    last_error: json.JSONDecodeError | None = None
+    for value in attempts:
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError as error:
+            last_error = error
+
+    raise last_error or json.JSONDecodeError("No JSON object found", output_text, 0)
+
+
+def _review_payload(prompt: str, *, retry: bool = False) -> dict[str, Any]:
+    retry_instruction = (
+        "\n\nThe previous attempt was not valid JSON. Return one complete JSON object only, "
+        "with every required field and no Markdown fences or commentary."
+        if retry
+        else ""
+    )
+    return {
+        "systemInstruction": {"parts": [{"text": ANALYST_INSTRUCTIONS}]},
+        "contents": [{"role": "user", "parts": [{"text": f"{prompt}{retry_instruction}"}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseJsonSchema": REVIEW_SCHEMA,
+            "maxOutputTokens": MAX_REVIEW_OUTPUT_TOKENS,
+        },
+    }
+
+
 def _validate_review(review: Any) -> dict[str, Any]:
     if not isinstance(review, dict):
         raise AIAnalystError("The model returned an invalid review object.")
@@ -295,23 +341,29 @@ def create_ai_review(
         f"Operator question: {question or 'Give a high-level review and identify what the county response team should prioritize next.'}\n\n"
         f"Aggregate snapshot:\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}"
     )
-    payload = {
-        "systemInstruction": {"parts": [{"text": ANALYST_INSTRUCTIONS}]},
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseJsonSchema": REVIEW_SCHEMA,
-            "maxOutputTokens": 2_000,
-        },
-    }
-    response = request_fn(payload, key) if request_fn else _call_gemini(payload, key, selected_model)
-    output_text = _extract_output_text(response)
-    if not output_text:
-        raise AIAnalystError("The model returned no review output.")
-    try:
-        review = _validate_review(json.loads(output_text))
-    except json.JSONDecodeError as error:
-        raise AIAnalystError("The model returned a review that could not be parsed.") from error
+    response: dict[str, Any] = {}
+    review: dict[str, Any] | None = None
+    last_error: Exception | None = None
+    for attempt in range(2):
+        payload = _review_payload(prompt, retry=attempt == 1)
+        response = request_fn(payload, key) if request_fn else _call_gemini(payload, key, selected_model)
+        output_text = _extract_output_text(response)
+        if not output_text:
+            raise AIAnalystError("Gemini returned no review output. Please try again.")
+        try:
+            review = _validate_review(_parse_review_json(output_text))
+            break
+        except (json.JSONDecodeError, AIAnalystError) as error:
+            last_error = error
+
+    if review is None:
+        if _finish_reason(response) == "MAX_TOKENS":
+            raise AIAnalystError(
+                "Gemini stopped before completing the report. Try a micro-zone review or generate the report again."
+            ) from last_error
+        raise AIAnalystError(
+            "Gemini returned an invalid structured report twice. Please generate the review again."
+        ) from last_error
     return {
         "review": review,
         "model": selected_model,

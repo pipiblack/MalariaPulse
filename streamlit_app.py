@@ -195,31 +195,32 @@ def _remember_secret(configured_password: str) -> str:
     return _secret("REMEMBER_ME_SECRET") or get_setting("REMEMBER_ME_SECRET") or f"malariapulse-demo:{configured_password}"
 
 
+def _clear_auth_query_params() -> None:
+    """Remove transient login tokens through Streamlit's top-level URL state."""
+    for name in (REMEMBER_QUERY_PARAM, FORGET_QUERY_PARAM, LOGOUT_QUERY_PARAM):
+        if name in st.query_params:
+            del st.query_params[name]
+
+
 def _render_remember_cookie_bridge(*, token: str | None = None, clear: bool = False, reload_after: bool = False) -> None:
     """Set or clear the signed browser token without storing the password."""
     cookie_name = json.dumps(REMEMBER_COOKIE_NAME)
     token_value = json.dumps(token or "")
-    query_names = json.dumps([REMEMBER_QUERY_PARAM, FORGET_QUERY_PARAM, LOGOUT_QUERY_PARAM])
     max_age = REMEMBER_LIFETIME_SECONDS
     st.html(
         f"""
         <script>
         (() => {{
-          const parentWindow = window;
           const cookieName = {cookie_name};
           const token = {token_value};
-          const secure = parentWindow.location.protocol === "https:" ? "; Secure" : "";
+          const secure = window.location.protocol === "https:" ? "; Secure" : "";
           if ({str(clear).lower()}) {{
-            parentWindow.document.cookie = `${{cookieName}}=; Max-Age=0; Path=/; SameSite=Lax${{secure}}`;
+            window.document.cookie = `${{cookieName}}=; Max-Age=0; Path=/; SameSite=Lax${{secure}}`;
           }} else if (token) {{
-            parentWindow.document.cookie = `${{cookieName}}=${{encodeURIComponent(token)}}; Max-Age={max_age}; Path=/; SameSite=Lax${{secure}}`;
+            window.document.cookie = `${{cookieName}}=${{encodeURIComponent(token)}}; Max-Age={max_age}; Path=/; SameSite=Lax${{secure}}`;
           }}
-          const url = new URL(parentWindow.location.href);
-          for (const name of {query_names}) url.searchParams.delete(name);
           if ({str(reload_after).lower()}) {{
-            parentWindow.location.replace(url.toString());
-          }} else {{
-            parentWindow.history.replaceState({{}}, "", url.toString());
+            window.location.replace(window.location.pathname);
           }}
         }})();
         </script>
@@ -431,7 +432,7 @@ def _render_file_upload(kind: str, dataset: dict[str, Any], *, key_prefix: str, 
     with note_col:
         st.caption(
             "Accepted: CSV, TSV, TXT, JSON, XLSX, HTML/HTM · first Excel sheet or HTML table · "
-            "maximum 1,000 rows / 2 MB · invalid files are never partially applied"
+            "no row-count limit · maximum 15 MB · invalid files are never partially applied"
         )
     uploaded = st.file_uploader(
         f"Choose {label.lower()} file",
@@ -456,6 +457,7 @@ def _render_file_upload(kind: str, dataset: dict[str, Any], *, key_prefix: str, 
         st.error(message)
     for message in preview["warnings"]:
         st.warning(message)
+    preview_row_limit = 200
     table_rows = [
         {
             "Row": row["rowNumber"],
@@ -464,9 +466,13 @@ def _render_file_upload(kind: str, dataset: dict[str, Any], *, key_prefix: str, 
             "Preview": row["preview"],
             "Errors": " ".join(row["errors"]),
         }
-        for row in preview["rows"]
+        for row in preview["rows"][:preview_row_limit]
     ]
     st.dataframe(pd.DataFrame(table_rows), hide_index=True, width="stretch")
+    if preview["rowCount"] > preview_row_limit:
+        st.caption(
+            f"Showing the first {preview_row_limit:,} rows. All {preview['rowCount']:,} rows were validated."
+        )
     if not preview["canApply"]:
         st.info("Correct every error and upload the file again before applying it.")
         return
@@ -687,16 +693,17 @@ forget_requested = _query_param(FORGET_QUERY_PARAM) == "1"
 
 if logout_requested:
     st.session_state.clear()
+    _clear_auth_query_params()
     _render_remember_cookie_bridge(clear=True, reload_after=True)
+elif forget_requested:
+    _clear_auth_query_params()
+    _render_remember_cookie_bridge(clear=True)
 elif remember_query_token:
+    _clear_auth_query_params()
     if validate_remember_token(remember_query_token, configured_username, remember_secret):
         st.session_state["authenticated"] = True
         st.session_state["authenticated_user"] = configured_username
         _render_remember_cookie_bridge(token=remember_query_token)
-    else:
-        del st.query_params[REMEMBER_QUERY_PARAM]
-elif forget_requested:
-    _render_remember_cookie_bridge(clear=True)
 elif not st.session_state.get("authenticated", False):
     remembered_token = st.context.cookies.get(REMEMBER_COOKIE_NAME)
     if validate_remember_token(remembered_token, configured_username, remember_secret):

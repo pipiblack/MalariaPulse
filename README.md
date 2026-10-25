@@ -93,7 +93,7 @@ REMEMBER_ME_SECRET=use_a_separate_long_random_value
 
 Remember-me sessions last 14 days and store only a signed, expiring browser token—not the password. Leave the option unchecked on a shared device. Logging out clears the remembered browser session. This remains demonstration authentication; replace it with managed identity and server-side session revocation before production use.
 
-The dashboard and existing Node/Eve implementation read and write the same ignored `data/operational.json` file, so data entered through either interface remains available to the others. Uploaded CSV, TSV, TXT, JSON, XLSX, and HTML/HTM files are limited to 1,000 aggregate rows and 2 MB. TXT files may use comma, tab, semicolon, or pipe delimiters. Excel imports use the first sheet and HTML imports use the first table. One invalid row blocks the entire import.
+The dashboard and existing Node/Eve implementation read and write the same ignored `data/operational.json` file, so data entered through either interface remains available to the others. Uploaded CSV, TSV, TXT, JSON, XLSX, and HTML/HTM files have no configured row-count limit and may be up to 15 MB. TXT files may use comma, tab, semicolon, or pipe delimiters. Excel imports use the first sheet and HTML imports use the first table. One invalid row blocks the entire import.
 
 The Streamlit dashboard includes four aggregate data domains:
 
@@ -139,7 +139,7 @@ cp .env.example .env.local
 npm run demo
 ```
 
-Open `http://localhost:3000`. Use **Bulk upload** to choose a clinical, environment, or supply file, download its CSV template, validate the whole file, and apply it. CSV, TSV, and JSON are supported; imports are limited to 1,000 aggregate rows and 2 MB. One invalid row blocks the entire import, so the saved dataset is never partially updated. The single-record tabs remain available for corrections.
+Open `http://localhost:3000`. Use **Bulk upload** to choose a clinical, environment, or supply file, download its CSV template, validate the whole file, and apply it. CSV, TSV, and JSON are supported; imports have no configured row-count limit and may be up to 15 MB. One invalid row blocks the entire import, so the saved dataset is never partially updated. The single-record tabs remain available for corrections.
 
 Saved values go to `data/operational.json`, which is ignored by Git, and immediately affect the dashboard, response cycles, Eve tools, and AI briefs. The immutable `data/seed.json` remains available as the original demo fixture. Patient-identifying columns are rejected; this MVP accepts aggregate zone and facility records only.
 
